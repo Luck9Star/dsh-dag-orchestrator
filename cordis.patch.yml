@@ -1,0 +1,44 @@
+# dsh-dag-orchestrator bundle patch (T09, DESIGN §3 / TASKS.md T09).
+#
+# 用途：把 dsh-dag-orchestrator 插件实例挂进 profile 的层序。本插件是纯
+#   tool 插件——M1 三件工具（dag_plan / dag_status / dag_tick）全部是新名
+#   字，注册在全局工具层，对所有会话天然可见：无需 disable 任何官方行
+#   （不接管官方工具名）、无需 preset 适配、零宿主补丁（本仓库没有
+#   patches/ 目录）。形态对齐 dsh-worktrees / dsh-ssh 的单 insert 写法。
+#   apply() 内部（lib/index.js）完成：config 校验 → dsh-tools 单实例自检
+#   → store 打开 → 崩溃对账 reconcile（§12，先于工具注册）→ executor/
+#   admission/engine 装配 → 按开关注册工具 → ctx.effect teardown。M2 的
+#   dag_control / dag_approve（T11/T12）落地后由其各自的注册开关接管。
+#
+# 安装方式：`dsh plugin --profile <name> add dsh-dag-orchestrator`（或 add
+#   <本地路径>）——reconcile 解析 package.json 的 dsh.bundle.patch 字段，
+#   自动把本 patch 层追加到 bundles 尾部，insert 行随即生效。之后在本
+#   仓库跑 `npm run setup:peer`（@deepseek-ai/dsh-tools 单实例 symlink，
+#   peer 纪律同 dsh-worktrees / dsh-plugin-subagents），再重启 dsh 开新会
+#   话。要覆盖配置，在 profile 层同 id 行写 config（profile 层覆盖 bundle
+#   层），键表见 lib/config.js：register 五开关 / dbPath（默认
+#   ~/.dsh/dag-orchestrator/dag.db）/ defaultMaxRunningAgents（默认 4）/
+#   defaultQueueCapacity（默认 16）/ inputInlineLimitBytes（默认 32768）/
+#   autoTickMs（默认 0，M1 恒 0——T14 Timer 的位）/ allowedRoots /
+#   requireWorkspaceRegistration。
+#
+# 互斥：无。新名字工具（dag_*）不与官方行或同族插件冲突，可与
+#   dsh-plugin-subagents、dsh-worktrees 等任意 bundle 并存（后两者正是本
+#   插件的执行面与 M3 组合面）。
+
+- insert:
+    # 本行即 host-plane Cordis 插件实例；dag_* 工具由它注册（M1 三件）。
+    - id: dag
+      name: dsh-dag-orchestrator
+      config:
+        # —— 全部键省略即走 lib/config.js 的 zod strict 默认；示例（注释）：
+        # register: {plan: true, status: true, tick: true, control: false, approve: false}
+        #                                   # 工具开关（M1 只实装 plan/status/tick；
+        #                                   # control/approve 为 T11/T12 预留位）
+        # dbPath: ~/.dsh/dag-orchestrator/dag.db   # sqlite 库路径（~ 展开）
+        # defaultMaxRunningAgents: 4      # 每 run 并发子代理上限（1..32）
+        # defaultQueueCapacity: 16        # 派发队列容量（1..1024）
+        # inputInlineLimitBytes: 32768    # inputs 内联上限（正整数）
+        # autoTickMs: 0                   # M1 恒 0（纯模型泵；T14 Timer 的位）
+        # allowedRoots: []                # cwd 门禁额外放行根
+        # requireWorkspaceRegistration: false

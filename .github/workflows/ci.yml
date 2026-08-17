@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        # node:sqlite needs >= 22.13 (engines). 22.13 is the floor the
+        # plugin is actually developed against; 24 is the current line
+        # (locally verified on v24.19.0).
+        node: [22.13, 24]
+        # Windows is deliberately DEFERRED (T24): node:sqlite needs a
+        # green run on a Windows CI runner before this matrix grows a
+        # windows-latest leg. Known gap — add it only after that
+        # validation, not speculatively.
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+        # The three @deepseek-ai peers (cordis, dsh-tools, dsh-subagent)
+        # are registry-published and pinned in package-lock.json, so
+        # `npm ci` installs real registry copies on a bare runner — no
+        # live harness root and NO setup:peer link step here. That is
+        # correct for CI: scripts/link-harness-dsh-tools.sh exists to
+        # dedupe peers against a RUNNING harness (it fails loud when no
+        # `dsh` binary / DSH_HARNESS_ROOT exists — by design), and a CI
+        # runner has neither. The suite runs against fakes; each test
+        # process owns its fresh module instances, so the dual-instance
+        # Symbol trap does not apply (the T01 peer-resolution smoke test
+        # skip-if-missing covers the unlinked shape). Verified
+        # clean-room before this workflow landed: `npm ci` from the
+        # lockfile → `npm run lint` → `npm test` = 479/479 on Node 24
+        # with zero live-harness setup.
+      - run: npm run lint
+        # node scripts/lint.js — pure node, no bash, same on every OS:
+        # node --check every lib/+test/+scripts module plus the sqlite
+        # outlet / db.exec allowlist / dsh-subagent import whitelist
+        # discipline audits.
+      - run: npm test
+        # node --test — fakes only: no network, no real CLI, no keys, no
+        # live model, no live harness. node:sqlite runs against
+        # tmp-dir/:memory: databases on the runner itself.

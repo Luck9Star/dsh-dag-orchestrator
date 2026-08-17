@@ -1,0 +1,54 @@
+{
+  "name": "dsh-dag-orchestrator",
+  "version": "0.1.0",
+  "description": "Resumable multi-task parallel DAG orchestration plugin for the DeepSeek Harness: strict-validated static DAG specs, tick-driven reconcile, node:sqlite persistence with an event hash-chain, crash reconciliation on apply(), and one DAG task node = one programmatic subagent delegation via ctx.subagents.",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib/",
+    "scripts/",
+    "cordis.patch.yml",
+    "docs/",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test 'test/*.test.js' 'test/.*.test.js'",
+    "lint": "node scripts/lint.js",
+    "setup:peer": "bash scripts/link-harness-dsh-tools.sh"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "cordis",
+    "dag",
+    "orchestration",
+    "subagent",
+    "workflow",
+    "sqlite",
+    "resumable"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dsh-dag-orchestrator/dsh-dag-orchestrator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dsh-dag-orchestrator/dsh-dag-orchestrator/issues"
+  },
+  "homepage": "https://github.com/dsh-dag-orchestrator/dsh-dag-orchestrator#readme",
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-subagent": "^0.1.0-rc.6"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT"
+}
