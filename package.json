@@ -31,12 +31,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dsh-dag-orchestrator/dsh-dag-orchestrator.git"
+    "url": "git+https://github.com/Luck9Star/dsh-dag-orchestrator.git"
   },
   "bugs": {
-    "url": "https://github.com/dsh-dag-orchestrator/dsh-dag-orchestrator/issues"
+    "url": "https://github.com/Luck9Star/dsh-dag-orchestrator/issues"
   },
-  "homepage": "https://github.com/dsh-dag-orchestrator/dsh-dag-orchestrator#readme",
+  "homepage": "https://github.com/Luck9Star/dsh-dag-orchestrator#readme",
   "dependencies": {
     "zod": "^3.23.0"
   },
