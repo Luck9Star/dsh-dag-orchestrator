@@ -17,6 +17,19 @@ map: DESIGN §9); the plugin pattern follows dsh-worktrees /
 dsh-plugin-subagents. This release carries milestones M1 + M2 + M3 in full
 (20 tasks, T01–T18 + T19/T24).
 
+### Documentation (2026-08-18) — README rewrite
+
+- Both READMEs (`README.md` / `README.zh.md`) rewritten in plain language,
+  still section-for-section aligned. New shape: what the plugin gives you →
+  why (serial single-subagent jobs, restart loses the plot) → the five
+  tools → install from a checkout with per-step explanations and an
+  expected result → quick start with a minimal spec and the plan/tick/
+  status loop → crash recovery in user terms → the task-spec fields that
+  matter → trimmed configuration table → troubleshooting table →
+  references & credits (task-weaver scheduler, `ctx.subagents`,
+  dsh-session-query-sqlite). Internal vocabulary (M1/M2/M3, task ids,
+  semver prerelease arcana, test counts) was dropped from the READMEs.
+
 ### Added
 
 **Five-tool family** (all new global-layer names — no official takeovers, no
