@@ -444,3 +444,37 @@ release. The final item is a note, not an open issue.
   revisions at their anchor lines.
 
 Suite: 514/514 green (511 prior + 3 new P3 warning tests), lint clean, zero network.
+
+### Docs (2026-08-18, README completion ahead of the GitHub publish)
+
+README.md + README.zh.md, updated together (section-for-section aligned):
+
+- **Compatibility banner** (both languages): compatible with DSH
+  `0.1.0-rc.7` (npm latest) and `0.1.0-rc.6`; `peerDependencies:
+  ^0.1.0-rc.6` satisfies rc.7 under semver (same-version-tuple prerelease
+  rule; `0.1.1-rc.x` would not). Verified against rc.7: `defineTool` /
+  `TOOL_RUNTIME_SCHEDULER` exports intact, the new `DefineToolOptions`
+  fields all optional, 514/514 green with peers linked to rc.7.
+- **Corrected the stale worktrees-seam status** (sequence ④ + the M3
+  section, en+zh): dsh-worktrees' provider-side `worktreesEngine` service
+  face IS implemented (`ctx.provide('worktreesEngine', …)` over the same
+  service/queue singletons, `lib/engine-face.js`) — the old "not yet
+  implemented / until it lands" text predated that landing and is removed;
+  the loud `dag.worktrees_unavailable` degradation is now stated as the
+  absent-face case only.
+- **Documented the `request.cwd` runtime dependency honestly**: the
+  official `SubagentStartRequest` has no `cwd` field, and the unpatched
+  rc.6/rc.7 runtime drops a per-call cwd (worktree isolation and explicit
+  `task.cwd` are silently ineffective). The verified remediation is stated
+  in sequence ④, the Install section, the `cwd` field note, and the M3
+  section: install dsh-plugin-subagents and run its `patches/install.sh`
+  (both patches apply verbatim onto rc.7 anchors); re-run it after every
+  dsh upgrade. The prior "probe VERIFIED against rc.6" claim (which
+  mistook patch-level forwarding for native support) is superseded by
+  this behavior-level statement.
+- **Cross-repo links absolutified** for the standalone GitHub repos
+  (dsh-plugin-subagents / dsh-worktrees →
+  `https://github.com/Luck9Star/<repo>`; the old `../` relative paths 404
+  outside the monorepo layout).
+- **Test count refreshed**: 508 → 514 (the suite grew; both language
+  versions).

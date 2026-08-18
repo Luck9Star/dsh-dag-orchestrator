@@ -2,6 +2,14 @@
 
 **English** | [简体中文](README.zh.md)
 
+> **DSH compatibility:** `0.1.0-rc.7` (npm latest) and `0.1.0-rc.6`.
+> `peerDependencies: ^0.1.0-rc.6` satisfies `rc.7` under semver (the
+> same-version-tuple prerelease rule; `0.1.1-rc.x` would not satisfy).
+> Verified against rc.7 — `defineTool` / `TOOL_RUNTIME_SCHEDULER` exports
+> intact, the new `DefineToolOptions` fields are all optional, and the
+> full suite (514/514) is green with the peers linked to rc.7.
+> Node ≥ 22.13. MIT.
+
 A DeepSeek Harness (DSH) plugin for **resumable multi-task parallel DAG
 orchestration**: submit a strictly-validated static DAG spec
 (`dag_plan`), and the plugin drives it — promoting ready tasks, dispatching
@@ -137,15 +145,30 @@ dag_control(run_id, action:'retry_task', task_id:'integrate')
 dag_tick(run_id) ×N
 ```
 
-**Honest status note**: this composition requires dsh-worktrees to expose
-its engine over the Cordis service face (`ctx.get('worktreesEngine')` with
-`getMergeQueue()` / `getWorktreeService()`). That provider-side exposure is
-**not yet implemented** in dsh-worktrees (verified — no `provide` /
-`worktreesEngine` anywhere in its `lib/`); the consumer contract of record
-is the `WorktreesEngineFace` JSDoc in `lib/worktrees-seam.js`. Until it
-lands, a spec containing worktree or merge tasks fails those nodes **loud**
-with permanent `dag.worktrees_unavailable` at dispatch; **agent-only DAGs
-are completely unaffected**.
+**Status**: the provider-side service face **is implemented** in
+[dsh-worktrees](https://github.com/Luck9Star/dsh-worktrees) — its `apply()`
+calls `ctx.provide('worktreesEngine', …)` over the SAME service/queue
+singletons its tools use (`lib/engine-face.js`), exposing exactly the
+`getMergeQueue()` / `getWorktreeService()` pair this plugin's seam admits,
+with the four-key enqueue and the five-state `DrainOutcome` drain. With both
+plugins installed the composition works end to end; when dsh-worktrees is
+absent (or a host ctx has no service face), a spec containing worktree or
+merge tasks fails those nodes **loud** with permanent
+`dag.worktrees_unavailable` at dispatch; **agent-only DAGs are completely
+unaffected**.
+
+**One real prerequisite for worktree isolation** (verified behavior, not a
+guess): the subagent `request.cwd` this plugin forwards is honored by the
+runtime **only after** [dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+is installed and its `patches/install.sh` has been run. The official
+`SubagentStartRequest` has no `cwd` field, and neither rc.6 nor rc.7 of the
+unpatched official runtime forwards a per-call cwd into the child session
+meta — without the patches, a worktree task's subagent silently inherits the
+parent's cwd and writes into the wrong tree. The two patches apply verbatim
+onto rc.7 anchors (verified), and **must be re-run after every dsh upgrade**
+(upgrades reinstall the pristine runtime). See
+[dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+for the patch set, its installer, and its doctor check.
 
 ## Install
 
@@ -181,8 +204,13 @@ dsh --profile web
   `engines` — the dynamic `import('node:sqlite')` fails loud, never
   silently degrades). The host itself satisfies this.
 - **No mutual exclusion**: `dag_*` are new names — this plugin coexists with
-  `dsh-plugin-subagents` (the execution layer) and `dsh-worktrees` (the M3
-  composition face), and both are recommended company.
+  [dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+  (the execution layer) and
+  [dsh-worktrees](https://github.com/Luck9Star/dsh-worktrees) (the M3
+  composition face), and both are recommended company. For `worktree:` task
+  isolation, also run dsh-plugin-subagents' `patches/install.sh` (see
+  [④ Deep composition](#④-deep-composition-with-dsh-worktrees-m3)) —
+  `request.cwd` forwarding is a patch-level capability of that plugin.
 - Config overrides go on the profile-layer row (same id), see
   [Configuration](#configuration).
 
@@ -260,7 +288,12 @@ Shape highlights (the full grammar lives in `lib/spec-validate.js`):
   of `spawn` — the harness registers only the two in-process provider
   names, and the executor maps the alias at dispatch so a `native` task
   never hits `NO_PROVIDER`), `model`, `provider`, `persona`, `toolFilter`,
-  `cwd`, `maxTokens`, `maxDepth`, `delegation`.
+  `cwd`, `maxTokens`, `maxDepth`, `delegation`. `cwd` passes the dispatch
+  gate (absolute, existing, realpath inside base-cwd ∪ `allowedRoots`) and
+  is forwarded as `request.cwd` — which the official unpatched runtime
+  does NOT honor (see [④ Deep composition](#④-deep-composition-with-dsh-worktrees-m3)):
+  install dsh-plugin-subagents and run its `patches/install.sh` to make
+  per-call cwd effective.
 - **toolFilter floor (red line 5)**: every task subagent dispatches with
   `deny [dag_plan, dag_status, dag_tick, dag_control, dag_approve,
   subagent, subagent_fork]` as the structural floor. The floor can only be
@@ -347,6 +380,28 @@ absence. The DAG never creates a second merge queue over the same
 worktrees state (their §10 forbids it) and never deletes worktrees — the
 worktree lifecycle belongs to the worktrees plugin; a DAG attempt's
 terminal state leaves the worktree for merge collection or manual cleanup.
+The provider side is live:
+[dsh-worktrees](https://github.com/Luck9Star/dsh-worktrees) `apply()` calls
+`ctx.provide('worktreesEngine', …)` over the same service/queue singletons
+its tools use — with both plugins installed, worktree tasks and merge nodes
+work end to end (the consumer contract is the `WorktreesEngineFace` JSDoc
+in `lib/worktrees-seam.js`, which the provider's `lib/engine-face.js`
+implements). When the face is absent, merge/worktree tasks fail loud
+permanent `dag.worktrees_unavailable` and agent-only DAGs are unaffected.
+
+**`request.cwd` needs dsh-plugin-subagents' patches.** The worktree path
+this plugin resolves becomes the subagent's `request.cwd` — but the
+official runtime's `SubagentStartRequest` carries no `cwd` field, and the
+unpatched rc.6/rc.7 runtime simply drops it (the child inherits the parent
+cwd). The verified remediation: install
+[dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+and run its `patches/install.sh` — its two minimal patches forward
+`request.cwd` into the child session's creation meta, and both apply
+verbatim onto rc.7 anchors. Re-run the installer after every dsh upgrade
+(an upgrade reinstalls the pristine runtime), which is also why
+[dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+is recommended company for any DAG that uses `worktree:` tasks or explicit
+`task.cwd`.
 Worktree reuse is scoped to the SAME task's re-dispatch (`retry_task` /
 retry policy — DESIGN §11.3): each `worktree.task` slug is unique across
 the spec (`dag.worktree_slug_conflict` at plan time), and at dispatch the
@@ -354,9 +409,7 @@ active record is reused only when its `correlationId` belongs to that
 task's own attempt history — a record that cannot prove ownership (or
 belongs to another task) falls through to create, which reports an
 occupied slug loud (`dag.worktree_create_failed`) instead of silently
-sharing a checkout. Until the provider-side service exposure lands in
-dsh-worktrees, merge/worktree tasks fail loud `dag.worktrees_unavailable`
-and agent-only DAGs are unaffected. When you DO compose them for real,
+sharing a checkout. When you DO compose them for real,
 align the two plugins' roots: dsh-worktrees' `worktreeRoot` (default
 `~/.dsh/worktrees/` — OUTSIDE the repo subtree) must sit inside this
 plugin's cwd-gate admission (`config.allowedRoots` or the run's base-cwd
@@ -381,7 +434,7 @@ open.
 ```bash
 npm install
 npm run setup:peer     # symlink the running harness's @deepseek-ai peers (above)
-npm test               # node:test — 508 cases; fakes only, zero network/CLI/model
+npm test               # node:test — 514 cases; fakes only, zero network/CLI/model
 npm run lint           # node --check every module + the discipline audits (below)
 ```
 

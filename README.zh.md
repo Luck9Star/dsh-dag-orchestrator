@@ -2,6 +2,13 @@
 
 [English](README.md) | **简体中文**
 
+> **DSH 兼容性**：`0.1.0-rc.7`（npm latest）与 `0.1.0-rc.6`。
+> `peerDependencies: ^0.1.0-rc.6` 在 semver 下满足 rc.7（同版本元组
+> prerelease 规则；`0.1.1-rc.x` 起才不满足）。已对 rc.7 实测 ——
+> `defineTool` / `TOOL_RUNTIME_SCHEDULER` 导出健在、`DefineToolOptions`
+> 新增字段全为可选、peers 链到 rc.7 时全套 514/514 全绿。
+> Node ≥ 22.13。MIT。
+
 DSH（DeepSeek Harness）的**断点续跑多任务并行 DAG 编排**插件：提交一份严格校验的静态
 DAG spec（`dag_plan`），由插件驱动 —— 提升就绪任务、派发（**一个任务节点 = 一次程序化
 subagent 委派**，`ctx.subagents.start`）、收割结果、传播失败、终态聚合 —— 泵是模型可见的
@@ -119,12 +126,26 @@ dag_control(run_id, action:'retry_task', task_id:'integrate')
 dag_tick(run_id) ×N
 ```
 
-**诚实的状态说明**：这组组合要求 dsh-worktrees 把其引擎经 Cordis 服务面暴露出来
-（`ctx.get('worktreesEngine')`，含 `getMergeQueue()` / `getWorktreeService()`）。
-该 provider 侧暴露**尚未实装**（已核实 —— 其 `lib/` 中无任何 `provide` /
-`worktreesEngine`）；消费侧契约以 `lib/worktrees-seam.js` 的 `WorktreesEngineFace`
-JSDoc 为准。在它落地之前，含 worktree 或 merge 任务的 spec 会在派发时对这些节点**大声**
-报永久 `dag.worktrees_unavailable`；**纯 agent DAG 完全不受影响**。
+**状态**：provider 侧服务门面**已实装** ——
+[dsh-worktrees](https://github.com/Luck9Star/dsh-worktrees) 的 `apply()`
+以 `ctx.provide('worktreesEngine', …)` 把其工具层**同一批** service/queue
+单例暴露出来（`lib/engine-face.js`），恰是本插件 seam 接纳的
+`getMergeQueue()` / `getWorktreeService()` 二元组，含四键 enqueue 与
+五态 `DrainOutcome` drain。两插件同装时组合端到端可用；dsh-worktrees
+缺席（或宿主 ctx 无服务面）时，含 worktree / merge 任务的 spec 会在派发时
+对这些节点**大声**报永久 `dag.worktrees_unavailable`；**纯 agent DAG 完全
+不受影响**。
+
+**worktree 隔离有一个真实前提**（行为级实测，非猜测）：本插件转发的
+subagent `request.cwd`，只有在装上
+[dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+并跑过其 `patches/install.sh` 之后才会被 runtime 尊重。官方
+`SubagentStartRequest` 没有 `cwd` 字段，未打补丁的官方 runtime 在 rc.6 与
+rc.7 上都不会把逐次调用 cwd 转发进子会话 meta —— 缺补丁时，worktree 任务的
+子代理会静默继承父 cwd、写错目录树。两枚补丁在 rc.7 锚点上逐字可应用
+（已验证），且**每次 dsh 升级后必须重跑安装器**（升级会重装纯净 runtime）。
+补丁集、安装器与 doctor 检查见
+[dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)。
 
 ## 安装
 
@@ -154,8 +175,13 @@ dsh --profile web
   apply 时也会自检，检测到第二实例时直接指出这个修法。
 - **环境要求**：Node **≥ 22.13**（`node:sqlite`；`engines` 已锁定 —— 动态
   `import('node:sqlite')` 失败即大声拒启，绝不静默降级）。宿主自身满足此要求。
-- **无互斥**：`dag_*` 是新名字 —— 本插件与 `dsh-plugin-subagents`（执行层）、
-  `dsh-worktrees`（M3 组合面）并存，且这两位正是推荐的搭子。
+- **无互斥**：`dag_*` 是新名字 —— 本插件与
+  [dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+  （执行层）、[dsh-worktrees](https://github.com/Luck9Star/dsh-worktrees)
+  （M3 组合面）并存，且这两位正是推荐的搭子。要用 `worktree:` 任务隔离，
+  还需跑 dsh-plugin-subagents 的 `patches/install.sh`（见
+  [④ 深组合](#④-与-dsh-worktrees-深组合m3)）—— `request.cwd` 转发是
+  该插件的补丁级能力。
 - 配置覆盖写在 profile 层同 id 行上，见[配置](#配置)。
 
 ## 配置
@@ -227,7 +253,11 @@ dsh --profile web
   （`native|spawn|fork`；`native` 是 `spawn` 的别名 —— harness 只注册这两个
   in-process provider 名，executor 在派发时做别名映射，`native` 任务不会撞
   `NO_PROVIDER`）、`model`、`provider`、`persona`、`toolFilter`、`cwd`、
-  `maxTokens`、`maxDepth`、`delegation`。
+  `maxTokens`、`maxDepth`、`delegation`。`cwd` 过派发门禁（绝对、存在、
+  realpath 落在基准 cwd ∪ `allowedRoots` 内）并以 `request.cwd` 转发 ——
+  但官方未打补丁的 runtime **不**消费它（见
+  [④ 深组合](#④-与-dsh-worktrees-深组合m3)）：装 dsh-plugin-subagents
+  并跑其 `patches/install.sh` 后逐次调用 cwd 才生效。
 - **toolFilter 地板（红线 5）**：每个任务子代理都带着 `deny [dag_plan,
   dag_status, dag_tick, dag_control, dag_approve, subagent, subagent_fork]`
   这层结构性地板派发。地板只能收窄：spec `deny` 只追加、`allow` 原样透传但
@@ -289,13 +319,30 @@ dsh --profile web
 `getMergeQueue()` 与 `getWorktreeService()` 才被接纳；其余一律视同缺席。DAG 绝不
 自建第二个 merge queue 指向同一 worktrees 状态（其 §10 明令禁止），也绝不删除
 worktree —— worktree 生命周期归 worktrees 插件；DAG attempt 的终态把 worktree 留给
-merge 收集或人工清理。worktree 复用范围限定在**同任务**重派发（`retry_task` / 重试
+merge 收集或人工清理。provider 侧已实装：
+[dsh-worktrees](https://github.com/Luck9Star/dsh-worktrees) 的 `apply()` 以
+`ctx.provide('worktreesEngine', …)` 暴露其工具层同一批 service/queue 单例 ——
+两插件同装时 worktree 任务与 merge 节点端到端可用（消费侧契约以
+`lib/worktrees-seam.js` 的 `WorktreesEngineFace` JSDoc 为准，provider 的
+`lib/engine-face.js` 即按它实装）。服务面缺席时 merge/worktree 任务大声报永久
+`dag.worktrees_unavailable`，纯 agent DAG 不受影响。
+
+**`request.cwd` 依赖 dsh-plugin-subagents 的补丁。** 本插件解析出的 worktree
+路径会成为子代理的 `request.cwd` —— 但官方 runtime 的 `SubagentStartRequest`
+没有 `cwd` 字段，未打补丁的 rc.6/rc.7 runtime 直接丢弃它（子代理继承父
+cwd）。实测可行的修法：安装
+[dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+并跑其 `patches/install.sh` —— 它的两枚最小补丁把 `request.cwd` 转发进子会话
+创建 meta，且都在 rc.7 锚点上逐字可应用。每次 dsh 升级后都要重跑该安装器
+（升级会重装纯净 runtime）；这也是任何用 `worktree:` 任务或显式 `task.cwd` 的
+DAG 都推荐搭配
+[dsh-plugin-subagents](https://github.com/Luck9Star/dsh-plugin-subagents)
+的原因。worktree 复用范围限定在**同任务**重派发（`retry_task` / 重试
 策略，DESIGN §11.3）：`worktree.task` slug 全 spec 唯一（计划时
 `dag.worktree_slug_conflict`）；派发时仅当 active 记录的 `correlationId` 属于该任务
 自己的 attempt 历史才复用 —— 无法证明归属（或属于他任务）的记录转走 create，后者
 对被占 slug 大声报 `dag.worktree_create_failed`，绝不静默共用检出。
-在 dsh-worktrees 侧服务暴露落地之前，merge/worktree 任务大声报
-`dag.worktrees_unavailable`，纯 agent DAG 不受影响。**真实组合时请对齐两插件根路径**：
+**真实组合时请对齐两插件根路径**：
 dsh-worktrees 的 `worktreeRoot`（默认 `~/.dsh/worktrees/`，位于仓库子树**之外**）必须落在
 本插件的 cwd 门禁放行范围内（`config.allowedRoots` 或 run 的基准 cwd 子树）——否则引擎提供的
 worktree path 会被本插件 cwd 门禁拒绝，任务在 transient `dag.worktree_create_failed` 上反复重试。
@@ -314,7 +361,7 @@ WAL + `busy_timeout = 5000` 保证别的进程恰好读时不损坏文件，但*
 ```bash
 npm install
 npm run setup:peer     # 把正在运行的 harness 的 @deepseek-ai peers symlink 进来（见上）
-npm test               # node:test —— 508 例；全 fake，零网络/零 CLI/零真实模型
+npm test               # node:test —— 514 例；全 fake，零网络/零 CLI/零真实模型
 npm run lint           # node --check 全模块 + 纪律审计（见下）
 ```
 
