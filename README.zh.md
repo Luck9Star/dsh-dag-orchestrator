@@ -224,8 +224,19 @@ dsh --profile web
   succeeded 上游）。`worktree.task` slug 在整个 spec 内唯一
   （`dag.worktree_slug_conflict`）—— slug 命名**一个**任务的 worktree，不是共享原语。
 - **逐任务委派字段**（平铺，与 `subagent` 工具参数同名）：`backend`
-  （`native|spawn|fork`）、`model`、`provider`、`persona`、`toolFilter`、`cwd`、
+  （`native|spawn|fork`；`native` 是 `spawn` 的别名 —— harness 只注册这两个
+  in-process provider 名，executor 在派发时做别名映射，`native` 任务不会撞
+  `NO_PROVIDER`）、`model`、`provider`、`persona`、`toolFilter`、`cwd`、
   `maxTokens`、`maxDepth`、`delegation`。
+- **toolFilter 地板（红线 5）**：每个任务子代理都带着 `deny [dag_plan,
+  dag_status, dag_tick, dag_control, dag_approve, subagent, subagent_fork]`
+  这层结构性地板派发。地板只能收窄：spec `deny` 只追加、`allow` 原样透传但
+  deny 地板不动、`delegation: true` 只移除两个 `subagent*` 名。指向本部署**未
+  注册**工具的条目（`register` 关掉的 `dag_*`、未装 subagents 插件宿主上的两个
+  委派工具）在派发时从 filter 裁掉 —— harness 的 `tools.restrict()` 对未知名
+  直接 throw，而 deny 一个不存在的工具本就无意义。已注册的 `dag_*` 工具永不可
+  被放开。**spec 中手写的工具名请与本宿主实际注册的工具名核对**——在无法探测
+  工具注册表的宿主上，未注册名可能在子代理创建时报错。
 - **依赖**：`{taskId, condition: succeeded|completed}` —— 不引入表达式语言。可选
   `gate: {artifact, expect, value?}`（T18）：对上游产出的有限五算子布尔检查
   （`exists | not_exists | contains | not_contains | equals`）—— 不是脚本面。
@@ -303,7 +314,7 @@ WAL + `busy_timeout = 5000` 保证别的进程恰好读时不损坏文件，但*
 ```bash
 npm install
 npm run setup:peer     # 把正在运行的 harness 的 @deepseek-ai peers symlink 进来（见上）
-npm test               # node:test —— 493 例；全 fake，零网络/零 CLI/零真实模型
+npm test               # node:test —— 508 例；全 fake，零网络/零 CLI/零真实模型
 npm run lint           # node --check 全模块 + 纪律审计（见下）
 ```
 

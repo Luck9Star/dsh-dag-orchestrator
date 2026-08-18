@@ -198,13 +198,13 @@ dispatch(task, attempt, exec):
        ...(task.output ? {outputSchema: task.output.schema} : {}),
        ...(task.cwd ? {cwd: task.cwd} : {}),       // 需 subagents cwd 补丁就位（§4.6）
      }
-  3. run = await ctx.subagents.start(task.backend ?? 'spawn', request)
+  3. run = await ctxSubagents.start(backend, request)   // backend = task.backend ?? 'spawn'；'native' 别名映射为 'spawn'（harness 只注册 spawn/fork 两个 provider 名，0.1.0 后审计 P2）
      └─ 失败（reject）：终态提交 failureType 'transient' code 'dag.dispatch_failed'（retryOn 匹配可重试）
   4. inFlight.set(attemptId, { run, controller, timeoutTimer })
   5. 派发即返回（不 await result）——收割归 tick（§4.4）
 ```
 
-**`DEFAULT_TASK_FILTER = {deny: ['dag_plan','dag_status','dag_tick','dag_control','dag_approve','subagent','subagent_fork']}`**：DAG 任务子代理**默认**无 DAG 控制面、无再委派（结构性防注入，红线 5；spec 可显式放开 `delegation: true` → 从 deny 移除 subagent 两项）。注意 dsh 原生 toolFilter 对未知名 loud 校验——dag_* 工具由本插件全局注册，运行时必在场，测试用 fake ctx 需注册同名 stub。
+**`DEFAULT_TASK_FILTER = {deny: ['dag_plan','dag_status','dag_tick','dag_control','dag_approve','subagent','subagent_fork']}`**：DAG 任务子代理**默认**无 DAG 控制面、无再委派（结构性防注入，红线 5；spec 可显式放开 `delegation: true` → 从 deny 移除 subagent 两项）。注意 dsh 原生 toolFilter 对未知名 loud 校验（`tools.restrict()` throw）。（0.1.0 后审计 P1 修订：该 throw 对**任何**未注册名生效、发生在子代理创建窗口内 → 全部派发 transient 重试空烧。地板现按两层裁剪——① apply 时按 register 开关裁掉未注册的 `dag_*` 条目；② 派发时若拿到宿主 ToolRuntime face（`ctx.tools.view(execAgent).restrictableNames`，泵者视图 ⊇ 子代理视图），把 allow/deny 与实际可 restrict 名集求交。裁剪只删**本部署不存在**的名字（deny 不存在的工具本就无意义），已注册 `dag_*` 的地板语义不变；测试用 fake ctx 无 face 时退化为不裁剪。）
 
 **深度治理**：DAG 派发的子代理 depth = parent depth + 1；`assertSubagentMaxDepth`（`@deepseek-ai/dsh-subagent` 纯函数白名单成员，subagents DESIGN §6.4.4）在 dispatch 前断言，防 DAG 层叠出无限委派树。这是本插件对 `@deepseek-ai/dsh-subagent` 的**唯一**直接 import（白名单纪律照搬 subagents 红线 12，lint 强制）。
 
@@ -523,11 +523,16 @@ task-weaver 的 verify = VerifyService 跑 argv + test-report-v1 artifact + `eva
 
 ```js
 parameters: {
-  spec:   { type: 'json', required: true,
-            description: 'WorkflowSpec JSON (see DESIGN §7.2). Validated strictly: unknown keys rejected, DAG must be acyclic, dependsOn/inputs must resolve.' },
-            // type:'json' = defineTool DSL 的无约束无损 JSON 节点（schema.d.ts ValueSchemaSpec）：
-            // 任意深嵌套的 spec 不做参数面逐属性建模（object 节点强制 additionalProperties 声明），
-            // 全部结构校验由 lib/spec-validate.js 承担（fail-loud），工具层只透传。
+  spec:   { type: 'object', additionalProperties: true, required: true,
+            description: 'WorkflowSpec object (see DESIGN §7.2). Validated strictly: unknown keys rejected, DAG must be acyclic, dependsOn/inputs must resolve.' },
+            // 真机集成修复（08）：spec 声明改为 OPEN object（additionalProperties:true），
+            // 不用 author-only 的 type:'json' 节点——'json' 编译出的 wire schema 无任何类型约束，
+            // glm-5.3 + newapi 网关对无约束对象参数固定序列化为 JSON 字符串，
+            // 到 execute 变成 string → zod schema_invalid "Expected object, received string"。
+            // 真类型 object 被所有 tool-calling 网关遵守；开放 additionalProperties 保持
+            // WorkflowSpec 面开放，全部结构校验仍由 lib/spec-validate.js（strict）承担，工具层只透传。
+            // execute() 额外对字符串形态 spec 做一次 JSON.parse 容错（解析失败仍走原
+            // schema_invalid 报错路径，校验强度不降）。
   resume: { type: 'boolean', description: 'If a run with the same name exists non-terminal, resume it instead of erroring (default false → loud name_exists).' },
 }
 output.schema: { type:'object', additionalProperties:false, properties: {

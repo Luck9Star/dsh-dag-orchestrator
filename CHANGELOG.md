@@ -227,9 +227,11 @@ task-weaver's 14-step tick):
 - GitHub Actions CI (`.github/workflows/ci.yml`): macOS/Ubuntu × Node
   22.13/24 running `npm ci` → `npm run lint` → `npm test`. The three
   `@deepseek-ai` peers are registry-published and lockfile-pinned, so a
-  bare runner installs them from npm (verified clean-room: 479/479 +
-  lint clean with no live harness). Windows is deferred until node:sqlite
-  is validated on a Windows runner (noted in the workflow).
+  bare runner installs them from npm (verified clean-room at the time of
+  that milestone: 479/479 + lint clean with no live harness; the suite
+  has since grown — 493 at 0.1.0 close, 508 after the post-release audit
+  below). Windows is deferred until node:sqlite is validated on a Windows
+  runner (noted in the workflow).
 
 ### Fixed
 
@@ -343,3 +345,102 @@ release. The final item is a note, not an open issue.
    receipt semantics; DESIGN §7.3 is updated accordingly. Not an open
    issue — the review classified it handled; this note exists so the
    semantic narrowing is visible in the release record.
+
+### Fixed (post-0.1.0 audit batch)
+
+- **P2 — `dag_plan` spec argument type + string-form tolerance (true-machine
+  integration):** the `spec` parameter was declared `type:'json'`, which
+  compiles to an annotation-only wire schema with NO type constraint;
+  glm-5.3 + newapi gateways serialize an unconstrained object argument as a
+  JSON STRING, arriving at execute as a string →
+  `dag.schema_invalid — Expected object, received string` (smoke-tested
+  15/15, isolated-reproduced). Two layers:
+  1. **Schema:** `spec` is now `type:'object', additionalProperties: true`
+     (a real object constraint every tool-calling gateway honors; the open
+     additionalProperties keeps the WorkflowSpec face open — its strict
+     down-field validation stays zod's job in `lib/spec-validate.js`). Only
+     `dag_plan` carried an object-typed input — the sibling tools
+     (dag_tick/dag_status/dag_approve/dag_control) take scalar parameters
+     only, so none were affected.
+  2. **Execute defense:** a string-form spec is `JSON.parse`'d by the new
+     pure `parseSpecArg` helper before strict validation; a malformed string
+     is kept raw so the strict path reports `dag.schema_invalid` with its
+     original message (validation strength unchanged). Defense for any other
+     model/gateway with the same stringification behavior.
+  DESIGN §8.1 rationale updated. New tests: the typed face rejects a
+  string-form spec (`ToolArgsError`), `parseSpecArg` round-trips a legal
+  string and passes a malformed string through, and the malformed-string →
+  `dag.schema_invalid` fallback pins the容错 semantics.
+
+- **P1 — deny floor vs `tools.restrict()` unknown-name throw (config-face
+  self-destruct):** `DEFAULT_TASK_FILTER` unconditionally denied seven
+  names, but the harness `tools.restrict()` (reached inside the subagent
+  child-creation window via the subagents plugin's
+  `applyChildComposition`) throws on ANY allow/deny name the child scope
+  cannot see. With a `dag_*` register switch off (`register: {approve:
+  false}`) or on a host without the subagents plugin's delegation tools,
+  EVERY dispatch failed inside the creation window → transient
+  `dag.dispatch_failed` → the retry budget burned on a permanent config
+  fact → the whole DAG unusable. Fixed in two complementary layers, both
+  preserving red line 5 (a REGISTERED `dag_*` tool can never be lifted;
+  spec `deny` only appends; `delegation: true` still removes only the two
+  `subagent*` names):
+  1. apply-time deterministic trim — the deny base drops `dag_*` entries
+     whose `register` switch is off (computed once per executor from the
+     resolved config);
+  2. dispatch-time registry intersection — `apply()` now passes the host
+     `ctx.tools` face into the executor, and each dispatch intersects the
+     merged filter (floor + spec `deny` + spec `allow`) with
+     `tools.view(execAgent).restrictableNames` (the pumping agent's
+     restrictable set, a superset of the child's since the child joins the
+     parent's preset standing scope). An unregistered name is vacuous to
+     deny, so dropping it opens nothing. A ctx without a usable view face
+     (fake ctx, unseen host shape) degrades to the un-intersected floor.
+  Regression tests cover both layers, the assembly path (a real
+  `dag_plan` dispatch under `register: {approve: false}` asserts the
+  dispatched filter contains no unregistered name), the allow/deny
+  intersection, and that the floor cannot be lifted by spec `allow`.
+- **P2 — `backend: 'native'` ghost value:** spec-validate admits
+  `native`, but the harness subagent runtime registers only the two
+  in-process provider names `spawn`/`fork` — a raw `native` hit
+  `NO_PROVIDER` on every dispatch and burned transient retries. The
+  executor now maps the alias at dispatch (`native` → `spawn`, the same
+  native channel `dsh-plugin-subagents` resolves its own
+  `backend: 'native'` to); `spawn`/`fork` pass through; the spec value
+  itself is kept verbatim (specHash stability preserved). The
+  `dag.bridge_unsupported` message now documents the alias, and README
+  (en+zh) note it in the field table.
+- **P2/P3 — stale metadata:** `lib/engine.js`'s step-1 comment no longer
+  calls `reconcileApprovals` an "M1 no-op placeholder" (T12 landed);
+  `lib/ready-evaluator.js`'s `READY_BLOCKED_CODES` comment no longer calls
+  the two `dependency_gate_*` codes "M3 placeholders" (T18 activated
+  them); the CHANGELOG's clean-room count is annotated as a historical
+  snapshot (479 at that milestone → 493 at 0.1.0 → 508 now). Test counts
+  in README/README.zh/AGENTS updated to 508.
+- **P3 — silent discarding of spec-authored allow/deny names (zero
+  feedback):** the P1 dispatch-time registry intersection trimmed floor AND
+  spec-authored filter names alike with no signal. A spec typo'ing a tool
+  name (or naming a tool this host does not register) had its `allow`/`deny`
+  entry vanish silently while the task ran on — against the plugin's
+  "never a guess, always loud" style. The intersection now attributes each
+  dropped name to its source: a FLOOR name trimmed stays silent (the tool
+  objectively does not exist in this deployment), while a spec hand-written
+  `allow`/`deny` name dropped for the same reason `logger.warn`s once per
+  dispatch — including the task id, the dropped-name list, and a pointer to
+  check against the host's actually-registered tool names. It is a warning,
+  deliberately NOT a throw (a throw here would re-introduce the P1
+  dispatch-window failure). No logger wired → the warning is skipped
+  silently. The README toolFilter floor sections (en+zh) now note the
+  degradation window: on a host where the tool registry cannot be probed,
+  an unregistered spec-authored name may error at subagent creation time.
+  New tests: a spec with an unregistered `allow` name dispatches
+  successfully AND warns (injected fake logger asserted); an unregistered
+  spec `deny` warns while the registered name stays; a dropped FLOOR name
+  stays completely silent.
+- Docs: README.md/README.zh.md add the `toolFilter` floor semantics
+  (bilingual, section-aligned) and the `native` alias note in the
+  `backend` field row; SECURITY.md documents the floor trim (a trim never
+  removes an entry for a registered tool); DESIGN §4.2 records both audit
+  revisions at their anchor lines.
+
+Suite: 514/514 green (511 prior + 3 new P3 warning tests), lint clean, zero network.

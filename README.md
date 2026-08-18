@@ -256,8 +256,24 @@ Shape highlights (the full grammar lives in `lib/spec-validate.js`):
   `worktree.task` slugs are unique across the spec (`dag.worktree_slug_conflict`)
   — a slug names ONE task's worktree, never a sharing primitive.
 - **Per-task delegation fields** (flat, mirroring the `subagent` tool's
-  parameter names): `backend` (`native|spawn|fork`), `model`, `provider`,
-  `persona`, `toolFilter`, `cwd`, `maxTokens`, `maxDepth`, `delegation`.
+  parameter names): `backend` (`native|spawn|fork`; `native` is an alias
+  of `spawn` — the harness registers only the two in-process provider
+  names, and the executor maps the alias at dispatch so a `native` task
+  never hits `NO_PROVIDER`), `model`, `provider`, `persona`, `toolFilter`,
+  `cwd`, `maxTokens`, `maxDepth`, `delegation`.
+- **toolFilter floor (red line 5)**: every task subagent dispatches with
+  `deny [dag_plan, dag_status, dag_tick, dag_control, dag_approve,
+  subagent, subagent_fork]` as the structural floor. The floor can only be
+  NARROWED: spec `deny` appends, `allow` passes through but deny stays,
+  and `delegation: true` removes only the two `subagent*` names. Entries
+  for tools this deployment does not register (a `dag_*` switch off in
+  `register`, or the two delegation tools on a host without the subagents
+  plugin) are trimmed from the filter at dispatch — the harness's
+  `tools.restrict()` rejects unknown names, and denying an unregistered
+  tool is vacuous anyway. A REGISTERED `dag_*` tool can never be lifted.
+  Spec-authored tool names should be checked against the tools this host
+  actually registers — on a host where the tool registry cannot be probed,
+  an unregistered name may error at subagent creation time.
 - **Dependencies**: `{taskId, condition: succeeded|completed}` — no
   expression language. Optional `gate: {artifact, expect, value?}` (T18):
   a finite five-operator boolean check (`exists | not_exists | contains |
@@ -365,7 +381,7 @@ open.
 ```bash
 npm install
 npm run setup:peer     # symlink the running harness's @deepseek-ai peers (above)
-npm test               # node:test — 493 cases; fakes only, zero network/CLI/model
+npm test               # node:test — 508 cases; fakes only, zero network/CLI/model
 npm run lint           # node --check every module + the discipline audits (below)
 ```
 

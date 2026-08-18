@@ -566,3 +566,112 @@ test('apply: reconcile has completed before tools are registered (probe via the 
   assert.ok(Number.isInteger(recoveryAt))
   assert.deepEqual(store.verifyChain(runId), { ok: true })
 })
+
+// ---------------------------------------------------------------------------
+// Post-0.1.0 audit P1 — assembly path: the dispatch deny floor never names
+// a tool this deployment did not register (tools.restrict() would throw
+// inside the child creation window → transient dag.dispatch_failed loop)
+// ---------------------------------------------------------------------------
+
+test('apply P1: register:{approve:false} → dispatched filter carries no unregistered dag_approve', async (t) => {
+  const ctx = fakeCtx()
+  const path = tmpDbPath()
+
+  // ToolRuntime-shaped fake: view(execAgent).restrictableNames mirrors the
+  // names actually registered in THIS deployment (the five dag_* switches
+  // minus approve, plus ordinary host tools; the subagents plugin's two
+  // delegation tools are ABSENT — a host without dsh-plugin-subagents).
+  const restrictableNames = new Set([
+    'dag_plan', 'dag_status', 'dag_tick', 'dag_control',
+    'bash', 'read', 'glob', 'grep',
+  ])
+  ctx.tools.view = () => ({ restrictableNames })
+
+  await apply(ctx, {
+    dbPath: path,
+    register: { plan: true, status: true, tick: true, control: true, approve: false },
+  })
+  t.after(() => ctx.teardowns[0]())
+  assert.deepEqual(
+    ctx.registered.map((tool) => tool.name).sort(),
+    ['dag_control', 'dag_plan', 'dag_status', 'dag_tick'],
+  )
+
+  // Drive ONE real dispatch through the registered dag_plan tool: the spec
+  // has a single agent task, the inline first tick claims and dispatches it
+  // onto the fake subagents face, and the captured request's toolFilter is
+  // the floor under test.
+  const startCalls = []
+  ctx.subagents.start = async (name, request) => {
+    startCalls.push({ name, request })
+    return { id: `sess-${startCalls.length}`, result: Promise.resolve({ stopReason: 'completed' }), dispose: async () => {} }
+  }
+  const plan = ctx.registered.find((tool) => tool.name === 'dag_plan')
+  const execAgent = { __live: 'agent', session: { header: { cwd: '/tmp/repo' } } }
+  await plan.execute({
+    spec: { version: 1, name: 'floor-audit', tasks: [{ id: 'work', kind: 'agent', prompt: 'do it' }] },
+  }, { agent: execAgent })
+
+  assert.equal(startCalls.length, 1, 'the inline first tick dispatched exactly one task')
+  const deny = startCalls[0].request.toolFilter.deny
+  // The P1 regression: every deny entry is a name THIS deployment
+  // registered (dag_approve was switched off; subagent/subagent_fork are
+  // not installed) — tools.restrict() can never throw on it.
+  assert.equal(deny.includes('dag_approve'), false)
+  assert.equal(deny.includes('subagent'), false)
+  assert.equal(deny.includes('subagent_fork'), false)
+  assert.deepEqual(deny, ['dag_plan', 'dag_status', 'dag_tick', 'dag_control'])
+})
+
+test('apply P1: full registration + installed subagent tools → the complete floor dispatches intact', async (t) => {
+  const ctx = fakeCtx()
+  const path = tmpDbPath()
+  const restrictableNames = new Set([
+    'dag_plan', 'dag_status', 'dag_tick', 'dag_control', 'dag_approve',
+    'subagent', 'subagent_fork', 'bash',
+  ])
+  ctx.tools.view = () => ({ restrictableNames })
+
+  await apply(ctx, { dbPath: path })
+  t.after(() => ctx.teardowns[0]())
+
+  const startCalls = []
+  ctx.subagents.start = async (name, request) => {
+    startCalls.push({ name, request })
+    return { id: `sess-${startCalls.length}`, result: Promise.resolve({ stopReason: 'completed' }), dispose: async () => {} }
+  }
+  const plan = ctx.registered.find((tool) => tool.name === 'dag_plan')
+  await plan.execute({
+    spec: { version: 1, name: 'floor-full', tasks: [{ id: 'work', kind: 'agent', prompt: 'do it' }] },
+  }, { agent: { __live: 'agent', session: { header: { cwd: '/tmp/repo' } } } })
+
+  assert.deepEqual(startCalls[0].request.toolFilter.deny, [
+    'dag_plan', 'dag_status', 'dag_tick', 'dag_control', 'dag_approve',
+    'subagent', 'subagent_fork',
+  ])
+})
+
+test('apply P2: a backend:native task dispatches on the spawn provider (assembly path)', async (t) => {
+  const ctx = fakeCtx()
+  const path = tmpDbPath()
+  ctx.tools.view = () => ({ restrictableNames: new Set([
+    'dag_plan', 'dag_status', 'dag_tick', 'dag_control', 'dag_approve',
+    'subagent', 'subagent_fork', 'bash',
+  ]) })
+
+  await apply(ctx, { dbPath: path })
+  t.after(() => ctx.teardowns[0]())
+
+  const startCalls = []
+  ctx.subagents.start = async (name, request) => {
+    startCalls.push({ name, request })
+    return { id: `sess-${startCalls.length}`, result: Promise.resolve({ stopReason: 'completed' }), dispose: async () => {} }
+  }
+  const plan = ctx.registered.find((tool) => tool.name === 'dag_plan')
+  await plan.execute({
+    spec: { version: 1, name: 'native-alias', tasks: [{ id: 'work', kind: 'agent', prompt: 'do it', backend: 'native' }] },
+  }, { agent: { __live: 'agent', session: { header: { cwd: '/tmp/repo' } } } })
+
+  assert.equal(startCalls.length, 1)
+  assert.equal(startCalls[0].name, 'spawn') // native alias resolved — never NO_PROVIDER
+})

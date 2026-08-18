@@ -19,7 +19,7 @@ breakdown is [docs/TASKS.md](docs/TASKS.md).
 ```bash
 npm install        # install dependencies
 npm run setup:peer # symlink the RUNNING harness's @deepseek-ai peers
-npm test           # node:test suite (493 cases; fakes only)
+npm test           # node:test suite (508 cases; fakes only)
 npm run lint       # node --check every module + the discipline audits
 ```
 

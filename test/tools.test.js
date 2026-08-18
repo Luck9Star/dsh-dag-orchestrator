@@ -27,9 +27,10 @@ import assert from 'node:assert/strict'
 
 import { validateArgs, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 
-import { registerDagPlan } from '../lib/tools/dag-plan.js'
+import { registerDagPlan, parseSpecArg } from '../lib/tools/dag-plan.js'
 import { registerDagStatus } from '../lib/tools/dag-status.js'
 import { registerDagTick } from '../lib/tools/dag-tick.js'
+import { validateSpec } from '../lib/spec-validate.js'
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -188,9 +189,14 @@ test('tools: parameter faces — compiled shapes match DESIGN §8.1-§8.3', () =
   const ctx = fakeCtx()
   const { plan, status, tick } = registerAll(ctx, { engine: fakeEngine(), store: fakeStore() })
 
-  // dag_plan: spec (json, required) + resume (boolean).
+  // dag_plan: spec (open object, required) + resume (boolean).
   assert.deepEqual(plan.parameters.required, ['spec'])
-  assert.equal(plan.parameters.properties.spec.type, undefined) // 'json' compiles to an annotation-only node
+  // spec compiles to a REAL `object` type (annotation-only `json` had no
+  // wire constraint — the exact hole glossed by the meta/glossary); the open
+  // additionalProperties keeps the WorkflowSpec face open for zod strict
+  // down-field validation.
+  assert.equal(plan.parameters.properties.spec.type, 'object')
+  assert.equal(plan.parameters.properties.spec.additionalProperties, true)
   assert.ok(plan.parameters.properties.spec.description.includes('WorkflowSpec'))
   assert.equal(plan.parameters.properties.resume.type, 'boolean')
 
@@ -361,6 +367,56 @@ test('dag_plan: same-name TERMINAL run does not block planning', async () => {
   assert.equal(result.run_id, 'dag_20260827_00000001')
 })
 
+test('dag_plan: the typed object face rejects a string-form spec at the argument boundary (schema layer)', async () => {
+  // Schema-layer regression: spec is now `type:'object'` in the compiled wire
+  // schema (previously the author-only `json` node had NO constraint there),
+  // so a gateway that hands a JSON STRING spec is rejected AT THE FACE as a
+  // ToolArgsError — it never reaches execute (the old leak path). This pins
+  // the missing type constraint that let glm-5.3/newapi stringify the spec.
+  const engine = fakeEngine()
+  const ctx = fakeCtx()
+  registerDagPlan(ctx, { engine, store: fakeStore() })
+  const plan = ctx.registered[0]
+
+  for (const str of [JSON.stringify(validSpec()), '{not valid json']) {
+    await assert.rejects(
+      () => plan.execute({ spec: str, resume: true }, execCtx()),
+      (error) => error.name === 'ToolArgsError' && /must be an object/.test(error.message),
+    )
+  }
+  // Nothing persisted, nothing ticked for either rejected call.
+  assert.equal(engine.calls.planRun.length, 0)
+  assert.equal(engine.calls.tick.length, 0)
+})
+
+test('dag_plan: parseSpecArg tolerance — string spec parsed; malformed string kept for zod to reject', () => {
+  // The execute-layer defense (parseSpecArg): a string is JSON.parsed into
+  // the object that the full strict validateSpec then checks; a malformed
+  // string is returned UNCHANGED so the strict path reports schema_invalid
+  // with its original message (no weaker branch).
+  assert.deepEqual(parseSpecArg(JSON.stringify(validSpec())), validSpec())
+  assert.equal(parseSpecArg('{not valid json'), '{not valid json')
+  // Non-string values pass through untouched (objects from the schema face).
+  const specObj = validSpec()
+  assert.equal(parseSpecArg(specObj), specObj)
+  assert.equal(parseSpecArg(7), 7)
+})
+
+test('dag_plan: a malformed string reaching the execute body still reports dag.schema_invalid', async () => {
+  // Belt-and-suspenders for the container path that bypasses the DSL wrapper:
+  // parseSpecArg keeps a malformed string, and the strict zod path rejects it
+  // with the original `Expected object, received string` → dag.schema_invalid
+  // contract. (Through the compiled tool the wrapper rejects the string
+  // first; this pins the容错 layer's own fallback semantics.)
+  const engine = fakeEngine()
+  const ctx = fakeCtx()
+  registerDagPlan(ctx, { engine, store: fakeStore() })
+
+  const validated = await validateSpec(parseSpecArg('{not valid json'))
+  assert.equal(validated.ok, false)
+  assert.ok(validated.errors.some((e) => e.code === 'dag.schema_invalid'))
+})
+
 // ---------------------------------------------------------------------------
 // dag_status
 // ---------------------------------------------------------------------------
@@ -496,7 +552,7 @@ test('tools: the enforced argument face rejects missing-required and wrong-type 
 
   // via the exported validateArgs on the DECLARED spec shapes.
   const planSpec = {
-    spec: { type: 'json', required: true },
+    spec: { type: 'object', additionalProperties: true, required: true },
     resume: { type: 'boolean' },
   }
   assert.ok(validateArgs(planSpec, {}).some((v) => v.includes('missing required')))

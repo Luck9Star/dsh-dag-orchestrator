@@ -395,6 +395,9 @@ test(`backend 'codex' → dag.bridge_unsupported (unknown bridge value)`, () => 
   const r = validateSpec(ONE_TASK({ backend: 'codex' }))
   const hit = expectError(r, CODE.bridgeUnsupported, 'tasks[0].backend')
   assert.match(hit.message, /native/)
+  // P2 audit: the rejection names the native=spawn alias so a 'native'
+  // spec author is never told the value is simply wrong.
+  assert.match(hit.message, /'native' is an alias of 'spawn'/)
 })
 
 test('backend native|spawn|fork all pass', () => {
@@ -402,6 +405,15 @@ test('backend native|spawn|fork all pass', () => {
     const r = validateSpec(ONE_TASK({ backend }))
     assert.equal(r.ok, true, `${backend}: ${JSON.stringify(r.errors)}`)
   }
+})
+
+test('P2: backend native and spawn hash DIFFERENTLY (spec value kept verbatim; the alias maps at dispatch only)', () => {
+  // The alias mapping lives in the executor (native → the spawn provider
+  // name); the spec value is NOT normalized — a stored spec re-hashes
+  // identically across restarts (specHash stability).
+  const a = specHash(validateSpec(ONE_TASK({ backend: 'native' })).value)
+  const b = specHash(validateSpec(ONE_TASK({ backend: 'spawn' })).value)
+  assert.notEqual(a, b)
 })
 
 // ---------------------------------------------------------------------------

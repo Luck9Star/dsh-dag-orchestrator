@@ -729,3 +729,233 @@ test('executor: createExecutor validates its constructor arguments', () => {
   assert.throws(() => createExecutor({ ctxSubagents: {} }), /start/)
   assert.throws(() => createExecutor({ ctxSubagents: fakeSubagents(), execAgentProvider: 'x' }), /execAgentProvider/)
 })
+
+// ---------------------------------------------------------------------------
+// Post-0.1.0 audit P1 — the deny floor only names tools the host registers
+// ---------------------------------------------------------------------------
+
+test('executor P1: register switch off trims its dag_* entry from the deny floor', () => {
+  const executor = createExecutor({
+    ctxSubagents: fakeSubagents(),
+    config: { register: { plan: true, status: true, tick: true, control: true, approve: false } },
+  })
+  const filter = executor.mergeTaskFilterForTest({})
+  assert.equal(filter.deny.includes('dag_approve'), false) // switch off → never registered → trimmed
+  for (const name of ['dag_plan', 'dag_status', 'dag_tick', 'dag_control', 'subagent', 'subagent_fork']) {
+    assert.equal(filter.deny.includes(name), true, `${name} stays on the floor`)
+  }
+  // The STATIC base is untouched (frozen contract of DEFAULT_TASK_FILTER).
+  assert.deepEqual(DEFAULT_TASK_FILTER.deny, DEFAULT_DENY)
+})
+
+test('executor P1: no register config (direct construction) keeps the full floor', () => {
+  const executor = createExecutor({ ctxSubagents: fakeSubagents() })
+  assert.deepEqual(executor.mergeTaskFilterForTest({}).deny, DEFAULT_DENY)
+  const executor2 = createExecutor({ ctxSubagents: fakeSubagents(), config: {} })
+  assert.deepEqual(executor2.mergeTaskFilterForTest({}).deny, DEFAULT_DENY)
+})
+
+test('executor P1: dispatch-time registry intersection drops unregistered names (register:{approve:false})', async () => {
+  const fake = fakeSubagents()
+  // A minimal ToolRuntime face: the pumping agent sees every floor name
+  // EXCEPT dag_approve (its register switch is off) and subagent_fork
+  // (host without the subagents plugin's fork tool).
+  const restrictable = new Set(
+    ['dag_plan', 'dag_status', 'dag_tick', 'dag_control', 'subagent', 'bash', 'read'],
+  )
+  const executor = createExecutor({
+    ctxSubagents: fake,
+    config: { register: { plan: true, status: true, tick: true, control: true, approve: false } },
+    toolsRuntime: { view: () => ({ restrictableNames: restrictable }) },
+  })
+  const { task, attempt, ctxInfo } = fixtures({ attempt: { attemptId: 'att-p1' } })
+  const res = await executor.dispatch(task, attempt, ctxInfo)
+  assert.equal(res.ok, true)
+  const deny = fake.calls[0].request.toolFilter.deny
+  assert.equal(deny.includes('dag_approve'), false) // unregistered → would throw in tools.restrict()
+  assert.equal(deny.includes('subagent_fork'), false) // host without the fork tool
+  assert.deepEqual(deny, ['dag_plan', 'dag_status', 'dag_tick', 'dag_control', 'subagent'])
+  executor.dispose('att-p1')
+})
+
+test('executor P1: registry intersection also applies to spec toolFilter allow and appended deny', async () => {
+  const fake = fakeSubagents()
+  const restrictable = new Set([...DEFAULT_DENY, 'bash', 'read'])
+  const executor = createExecutor({
+    ctxSubagents: fake,
+    toolsRuntime: { view: () => ({ restrictableNames: restrictable }) },
+  })
+  const { attempt, ctxInfo } = fixtures({ attempt: { attemptId: 'att-p1b' } })
+  await executor.dispatch(
+    {
+      id: 'analyze',
+      prompt: 'p',
+      toolFilter: { allow: ['bash', 'ghost_tool'], deny: ['read', 'phantom_tool'] },
+    },
+    attempt,
+    ctxInfo,
+  )
+  const filter = fake.calls[0].request.toolFilter
+  // allow keeps only registered names; the unknown ghost_tool would have
+  // thrown in tools.restrict() ("names unknown global tools").
+  assert.deepEqual(filter.allow, ['bash'])
+  // spec deny is appended then intersected — phantom_tool dropped.
+  assert.deepEqual(filter.deny, [...DEFAULT_DENY, 'read'])
+  executor.dispose('att-p1b')
+})
+
+test('executor P1: no toolsRuntime face → un-intersected floor (degradation, not failure)', async () => {
+  const fake = fakeSubagents()
+  const executor = createExecutor({ ctxSubagents: fake }) // no toolsRuntime
+  const { task, attempt, ctxInfo } = fixtures({ attempt: { attemptId: 'att-p1c' } })
+  await executor.dispatch(task, attempt, ctxInfo)
+  assert.deepEqual(fake.calls[0].request.toolFilter.deny, DEFAULT_DENY)
+  executor.dispose('att-p1c')
+})
+
+test('executor P1: delegation:true still removes subagent names AFTER the intersection inputs', () => {
+  const executor = createExecutor({ ctxSubagents: fakeSubagents() })
+  const f = executor.mergeTaskFilterForTest({ delegation: true })
+  assert.deepEqual(f.deny, ['dag_plan', 'dag_status', 'dag_tick', 'dag_control', 'dag_approve'])
+})
+
+test('executor P1: a toolsRuntime face without view() is tolerated (constructor does not throw)', () => {
+  const executor = createExecutor({ ctxSubagents: fakeSubagents(), toolsRuntime: { register() {} } })
+  assert.deepEqual(executor.mergeTaskFilterForTest({}).deny, DEFAULT_DENY) // probe degrades to no intersection
+  assert.throws(() => createExecutor({ ctxSubagents: fakeSubagents(), toolsRuntime: 'nope' }), /toolsRuntime/)
+})
+
+// ---------------------------------------------------------------------------
+// Post-0.1.0 audit P3 — a dropped SPEC-authored allow/deny name is loud
+// (warn, not throw); a dropped FLOOR name stays silent. Never a guess.
+// ---------------------------------------------------------------------------
+
+test('executor P3: spec allow name NOT registered → dispatch succeeds + logger.warn (injected fake logger)', async () => {
+  const fake = fakeSubagents()
+  const warns = []
+  // Restrictable set WITHOUT ghost_tool (the spec's typo'd allow name).
+  const restrictable = new Set([...DEFAULT_DENY, 'bash'])
+  const executor = createExecutor({
+    ctxSubagents: fake,
+    toolsRuntime: { view: () => ({ restrictableNames: restrictable }) },
+    logger: { warn: (m) => warns.push(m) },
+  })
+  const { attempt, ctxInfo } = fixtures({ attempt: { attemptId: 'att-p3-allow' } })
+  const res = await executor.dispatch(
+    { id: 'analyze', prompt: 'p', toolFilter: { allow: ['bash', 'ghost_tool'] } },
+    attempt,
+    ctxInfo,
+  )
+  // Dispatch still succeeds — P3 warns instead of throw (no re-adding the P1 throw).
+  assert.equal(res.ok, true)
+  assert.deepEqual(fake.calls[0].request.toolFilter.allow, ['bash']) // ghost_tool dropped
+  assert.equal(warns.length, 1)
+  assert.match(warns[0], /task \[analyze\]/)
+  assert.match(warns[0], /ghost_tool/)
+  assert.match(warns[0], /registered in this host/)
+  executor.dispose('att-p3-allow')
+})
+
+test('executor P3: spec deny name NOT registered → warn names it, floor stays silent', async () => {
+  const fake = fakeSubagents()
+  const warns = []
+  const restrictable = new Set([...DEFAULT_DENY, 'read']) // phantom_tool unknown here
+  const executor = createExecutor({
+    ctxSubagents: fake,
+    toolsRuntime: { view: () => ({ restrictableNames: restrictable }) },
+    logger: { warn: (m) => warns.push(m) },
+  })
+  const { task, attempt, ctxInfo } = fixtures({ attempt: { attemptId: 'att-p3-deny' } })
+  const res = await executor.dispatch(
+    { id: 'analyze', prompt: 'p', toolFilter: { deny: ['read', 'phantom_tool'] } },
+    attempt,
+    ctxInfo,
+  )
+  assert.equal(res.ok, true)
+  // read is registered → survives; phantom_tool dropped → warned. Floor intact.
+  assert.deepEqual(fake.calls[0].request.toolFilter.deny, [...DEFAULT_DENY, 'read'])
+  assert.equal(warns.length, 1)
+  assert.match(warns[0], /phantom_tool/)
+  assert.equal(warns[0].includes('read'), false) // registered name never reported
+  executor.dispose('att-p3-deny')
+})
+
+test('executor P3: a dropped FLOOR name (unregistered dag tool) stays SILENT — no warn', async () => {
+  const fake = fakeSubagents()
+  const warns = []
+  // dag_approve is NOT in the restrictable set (register switch off / host
+  // without it), but it is a FLOOR name, not a spec-authored one.
+  const restrictable = new Set([...DEFAULT_DENY.filter((n) => n !== 'dag_approve'), 'bash'])
+  const executor = createExecutor({
+    ctxSubagents: fake,
+    config: { register: { plan: true, status: true, tick: true, control: true, approve: false } },
+    toolsRuntime: { view: () => ({ restrictableNames: restrictable }) },
+    logger: { warn: (m) => warns.push(m) },
+  })
+  const { task, attempt, ctxInfo } = fixtures({ attempt: { attemptId: 'att-p3-floor' } })
+  const res = await executor.dispatch(task, attempt, ctxInfo) // no spec toolFilter
+  assert.equal(res.ok, true)
+  assert.equal(fake.calls[0].request.toolFilter.deny.includes('dag_approve'), false) // trimmed
+  assert.deepEqual(warns, []) // floor drop → silent, zero warn
+  executor.dispose('att-p3-floor')
+})
+
+test('executor P1: the deny floor can never be lifted by spec allow', async () => {
+  const fake = fakeSubagents()
+  const restrictable = new Set([...DEFAULT_DENY, 'bash'])
+  const executor = createExecutor({
+    ctxSubagents: fake,
+    toolsRuntime: { view: () => ({ restrictableNames: restrictable }) },
+  })
+  const { attempt, ctxInfo } = fixtures({ attempt: { attemptId: 'att-p1d' } })
+  // A spec attempting to allow the control plane back: allow passes through
+  // as-is (it governs non-dag tools only); the deny floor is untouched.
+  await executor.dispatch(
+    { id: 'analyze', prompt: 'p', toolFilter: { allow: ['dag_tick', 'bash'] } },
+    attempt,
+    ctxInfo,
+  )
+  const filter = fake.calls[0].request.toolFilter
+  assert.deepEqual(filter.deny, DEFAULT_DENY) // floor intact — red line 5
+  assert.deepEqual(filter.allow, ['dag_tick', 'bash']) // allow passes through (deny still wins in the harness)
+  executor.dispose('att-p1d')
+})
+
+// ---------------------------------------------------------------------------
+// Post-0.1.0 audit P2 — backend 'native' is an alias of 'spawn'
+// ---------------------------------------------------------------------------
+
+test('executor P2: backend native maps to the spawn provider name at dispatch', async () => {
+  const fake = fakeSubagents()
+  const executor = createExecutor({ ctxSubagents: fake })
+  const { attempt, ctxInfo } = fixtures({ attempt: { attemptId: 'att-native' } })
+  await executor.dispatch({ id: 'analyze', prompt: 'p', backend: 'native' }, attempt, ctxInfo)
+  assert.equal(fake.calls[0].name, 'spawn') // provider name, NOT 'native' (NO_PROVIDER)
+  executor.dispose('att-native')
+})
+
+test('executor P2: explicit spawn/fork pass through unchanged', async () => {
+  const fake = fakeSubagents()
+  const executor = createExecutor({ ctxSubagents: fake })
+  await executor.dispatch({ id: 't', prompt: 'p', backend: 'fork' }, { attemptId: 'att-fork', ordinal: 1 }, { runName: 'r', runId: 'run-1', execAgent: {} })
+  assert.equal(fake.calls[0].name, 'fork')
+  await executor.dispatch({ id: 't', prompt: 'p', backend: 'spawn' }, { attemptId: 'att-spawn', ordinal: 1 }, { runName: 'r', runId: 'run-1', execAgent: {} })
+  assert.equal(fake.calls[1].name, 'spawn')
+  executor.dispose('att-fork')
+  executor.dispose('att-spawn')
+})
+
+test('executor P1: a PARTIAL register object keeps unset switches on the floor (explicit-off-only trim)', () => {
+  // register defaults are all-on; a missing key must NOT trim its dag_*
+  // entry (over-trimming a still-registered tool would open the control
+  // plane — red line 5). Only an explicit false trims.
+  const executor = createExecutor({
+    ctxSubagents: fakeSubagents(),
+    config: { register: { plan: false } }, // approve/tick/... unset → all stay
+  })
+  const deny = executor.mergeTaskFilterForTest({}).deny
+  assert.equal(deny.includes('dag_plan'), false) // explicit off → trimmed
+  for (const name of ['dag_status', 'dag_tick', 'dag_control', 'dag_approve', 'subagent', 'subagent_fork']) {
+    assert.equal(deny.includes(name), true, `${name} stays (its switch is unset, default on)`)
+  }
+})

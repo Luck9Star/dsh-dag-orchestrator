@@ -20,14 +20,21 @@ database** for the DeepSeek Harness. Please read this before deploying it.
   `spec.prompt` itself is likewise only ever a string.
 - **The DAG control plane is denied to task subagents by default.** Every
   dispatched task subagent carries `toolFilter deny [dag_plan, dag_status,
-  dag_tick, dag_control, dag_approve, subagent, subagent_fork]`. The
-  `dag_*` entries can NEVER be lifted (spec `toolFilter.deny` only
-  APPENDS; `allow` passes through but deny stays the floor), so a task
+  dag_tick, dag_control, dag_approve, subagent, subagent_fork]` as its
+  floor. The `dag_*` entries can NEVER be lifted (spec `toolFilter.deny`
+  only APPENDS; `allow` passes through but deny stays the floor), so a task
   node — even one fed hostile upstream content — cannot drive the DAG,
   approve its own gate, or cancel siblings. The two `subagent*` entries
   are removed only by an explicit `delegation: true` on that task (nested
   delegation is then governed by `maxDepth` and the harness's own
-  `assertSubagentMaxDepth`, asserted before every dispatch).
+  `assertSubagentMaxDepth`, asserted before every dispatch). Entries
+  naming tools the deployment never registered (a `dag_*` tool switched
+  off in the plugin's `register` config, or the two delegation tools on a
+  host without the subagents plugin) are trimmed from the dispatched
+  filter — the harness's `tools.restrict()` rejects unknown names, and
+  denying an unregistered tool is vacuous: the name it protects does not
+  exist. The trim never removes an entry for a REGISTERED tool, so the
+  floor over everything that actually exists is unchanged.
 - **Approval decisions stay in the human loop.** An `approval` task parks
   `blocked(approval_pending)`; only the orchestration conversation can
   decide it via `dag_approve` — and task subagents cannot call
@@ -35,10 +42,11 @@ database** for the DeepSeek Harness. Please read this before deploying it.
   only; promotion belongs to the next tick.
 - **Permissions never escalate (native-only, structural).** The spec
   surface rejects `permission_mode` / `reasoning_effort` keys and any
-  `backend` outside `native|spawn|fork` with `dag.bridge_unsupported` at
-  validation time. A DAG task therefore cannot request a bridge product
-  CLI's "bypass all permission checks" mode — the escalation channel does
-  not exist in this plugin's grammar rather than being merely discouraged.
+  `backend` outside `native|spawn|fork` (`native` dispatches as `spawn`)
+  with `dag.bridge_unsupported` at validation time. A DAG task therefore
+  cannot request a bridge product CLI's "bypass all permission checks"
+  mode — the escalation channel does not exist in this plugin's grammar
+  rather than being merely discouraged.
   If a bridge seam is ever added, it must reuse the subagents plugin's
   `readonly < default < full` ceiling (fail closed) — recorded in
   AGENTS.md red line 6.
