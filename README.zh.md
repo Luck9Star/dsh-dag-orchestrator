@@ -30,15 +30,15 @@
 ## 安装
 
 ```sh
-# 1. 拉取仓库，并把它链接到正在运行的 dsh 的内部包上
-git clone https://github.com/Luck9Star/dsh-dag-orchestrator
-cd dsh-dag-orchestrator
-npm install
-npm run setup:peer        # 避免出现第二份 dsh-tools（没有这一步工具调用会崩）
-
-# 2. 安装进 dsh profile 并重启
-dsh plugin --profile web add "$(pwd)"
+# 1. 安装进 dsh profile 并重启
+dsh plugin --profile web add dsh-dag-orchestrator
 dsh --profile web         # 开一个新会话
+
+# 用本地检出而不是 npm？先把它链接到正在运行的 dsh 的内部包上（避免出现第二份
+# dsh-tools，否则每次工具调用都会崩），再按路径安装：
+#   git clone https://github.com/Luck9Star/dsh-dag-orchestrator && cd dsh-dag-orchestrator
+#   npm install && npm run setup:peer
+#   dsh plugin --profile web add "$(pwd)"
 ```
 
 **预期结果：** 新会话里出现 `dag_plan`、`dag_status`、`dag_tick`、`dag_control`、`dag_approve` 五个工具。第一次 `dag_plan` 之后，数据库出现在 `~/.dsh/dag-orchestrator/dag.db`。

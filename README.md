@@ -41,15 +41,16 @@ event log; on the next start, crashed runs are reconciled and can resume).
 ## Install
 
 ```sh
-# 1. Get the repo and link it to your running dsh's internal packages
-git clone https://github.com/Luck9Star/dsh-dag-orchestrator
-cd dsh-dag-orchestrator
-npm install
-npm run setup:peer        # avoids a second copy of dsh-tools (tool calls crash without this)
-
-# 2. Install into your dsh profile and restart
-dsh plugin --profile web add "$(pwd)"
+# 1. Install into your dsh profile and restart
+dsh plugin --profile web add dsh-dag-orchestrator
 dsh --profile web         # open a NEW session
+
+# Local checkout instead of npm? Link it to your running dsh's internal
+# packages first (avoids a second copy of dsh-tools, which crashes every
+# tool call), then install from the path:
+#   git clone https://github.com/Luck9Star/dsh-dag-orchestrator && cd dsh-dag-orchestrator
+#   npm install && npm run setup:peer
+#   dsh plugin --profile web add "$(pwd)"
 ```
 
 **Expected result:** a new session exposes the `dag_plan`, `dag_status`,
