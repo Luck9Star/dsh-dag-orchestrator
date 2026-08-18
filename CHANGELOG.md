@@ -30,6 +30,11 @@ dsh-plugin-subagents. This release carries milestones M1 + M2 + M3 in full
   dsh-session-query-sqlite). Internal vocabulary (M1/M2/M3, task ids,
   semver prerelease arcana, test counts) was dropped from the READMEs.
 
+### CI (2026-08-18)
+
+- Added gitleaks secret scanning: `.github/workflows/gitleaks.yml` (full
+  history scan on every push/PR) and `.pre-commit-config.yaml` for local
+  commits; matches the gateway-provider repo's setup.
 ### Added
 
 **Five-tool family** (all new global-layer names — no official takeovers, no
