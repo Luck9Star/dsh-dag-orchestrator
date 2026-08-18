@@ -32,6 +32,13 @@ dsh-plugin-subagents. This release carries milestones M1 + M2 + M3 in full
 
 ### CI (2026-08-18)
 
+- CI flake fixed: `boundedRace`'s settle timer is no longer `unref()`'d.
+  With only a hanging attempt in flight, the unref'd timer let the event
+  loop drain mid-`tick()` — quiet CI runners died inside the await with
+  the promise still pending ("Promise resolution is still pending but the
+  event loop has already resolved", ubuntu/macos legs). A ref'd timer for
+  the duration of the bounded wait is the correct contract; reproduced
+  deterministically in a bare process before the fix. 514/514 locally.
 - Added gitleaks secret scanning: `.github/workflows/gitleaks.yml` (full
   history scan on every push/PR) and `.pre-commit-config.yaml` for local
   commits; matches the gateway-provider repo's setup.
