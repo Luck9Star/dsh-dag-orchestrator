@@ -1,6 +1,6 @@
 {
   "name": "dsh-dag-orchestrator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Resumable multi-task parallel DAG orchestration plugin for the DeepSeek Harness: strict-validated static DAG specs, tick-driven reconcile, node:sqlite persistence with an event hash-chain, crash reconciliation on apply(), and one DAG task node = one programmatic subagent delegation via ctx.subagents.",
   "type": "module",
   "main": "lib/index.js",
