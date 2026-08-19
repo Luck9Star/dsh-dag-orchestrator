@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — read-only `dagOrchestrator` service face (UI composition seam)
+
+- New `lib/dag-face.js`: `createDagFace({ engine, store, logger })` builds a
+  frozen, read-only face over the same engine/store singletons the `dag_*`
+  tools use, published from `apply()` as `ctx.provide('dagOrchestrator', face)`
+  — strictly after crash reconciliation and after the engine exists, so
+  consumers only ever observe post-reconcile state. A missing or throwing
+  `ctx.provide` degrades to a `logger.warn` and never blocks tool
+  registration. Sibling plugins and UI host halves read it with
+  `ctx.get('dagOrchestrator')`; control operations stay on the `dag_*` tools.
+  Surface:
+  - `status(runId?, options?)` — `engine.status` passthrough (all-runs
+    summary when `run_id` is undefined/null/empty, matching the tool layer);
+  - `getSpec(runId)` — `{ run_id, name, spec_hash, spec }` with
+    `runs.spec_json` parsed (DAG graph edges = `spec.tasks[].dependsOn`);
+  - `listOutputs(runId)` — the validated outputs table rows as
+    `[{ task_id, name, value, produced_by_attempt }]` with `value_json`
+    parsed (not exposed through `engine.status` before);
+  - `attemptSummaries(runId, taskId?)` — per-attempt rows plus the parsed
+    `result_json` summary when present (conditional expansion: no
+    undefined-valued keys anywhere).
+  Unknown runs fail loud with `dag.run_not_found`. No new store methods; the
+  face composes existing readers. Tests in `test/dag-face.test.js` (fakes
+  only — fake engine + fake store for the unit layer, the `index.test.js`
+  fake-ctx pattern for the apply()/provide path, including the
+  provide-absent and provide-throwing degradation arms).
+
+### Added — dsh-dag-view UI package + docs
+
+- New `ui/` subpackage `dsh-dag-view` (insert id `dag-view`), a dual-face
+  web plugin on the official `dsh.client` platform: the host half serves
+  the `POST /dag-view/{runs,run,events,attempt-logs}` JSON-envelope routes
+  over the `dagOrchestrator` face (resolved lazily per request); the
+  browser half (closure-factory `lib/client.js` bundle) injects a sidebar
+  entry and renders the React views — runs list, layered DAG graph with
+  state colors and per-kind shapes, task detail, event stream, attempt
+  logs with live `subagents.history` fallback to the stored summary, and
+  validated outputs. Polling only (run list 10 s, open run 2 s, paused
+  when hidden); control operations stay on the `dag_*` tools — read-only
+  by design. Routes degrade to `dag_view.unavailable` when the core
+  plugin is absent. TypeScript + vitest (54 cases; host routes in node,
+  client suites in jsdom).
+- Documentation: both READMEs gained a "Web UI (dsh-dag-view)" section
+  (install-from-checkout table, architecture, subagent-logs caveat,
+  build/dev), kept section-for-section aligned; new `ui/README.md`
+  covers the package itself (file map, endpoint reference, layout
+  algorithm, client mount pattern, dev commands, profile install, v1
+  limitations).
+
 ## [0.1.1] - 2026-08-18
 
 First release through the npm trusted-publishing pipeline (OIDC, tag

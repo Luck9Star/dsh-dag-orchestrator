@@ -1,0 +1,33 @@
+{
+  // Typecheck program (the `tsc --noEmit` script reads THIS file): src +
+  // tests in one program, self-contained — no extends/paths/references
+  // into any DSH source checkout or dsh-web-ui. A single program is sound
+  // here (task-board style) because the browser half declares its own
+  // minimal ClientContext instead of importing SDK client types, so the
+  // host/client Context merges never collide in one ts.Program (the
+  // TS2717 collision that forced git-graph's solution split). The per-side
+  // programs (tsconfig.host.json / tsconfig.client.json) remain for
+  // per-face builds; tsconfig.build.json is the single declaration emit.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx"
+  ]
+}

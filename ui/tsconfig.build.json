@@ -1,0 +1,33 @@
+{
+  // Build program: emits declarations for BOTH halves into lib/types
+  // (self-contained; no extends/paths/references into any DSH checkout or
+  // dsh-web-ui). The host and client programs above are the typecheck
+  // split; this program is the single declaration emit the package's
+  // exports map points at (lib/types/index.d.ts + lib/types/client/index.d.ts).
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/client/css-modules.d.ts"
+  ]
+}

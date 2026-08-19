@@ -165,6 +165,48 @@ row in your profile's `cordis.patch.yml`; unknown keys fail loudly at startup.
   worktree root (`~/.dsh/worktrees/`) is outside your repo — add that path
   to `allowedRoots` here or worktree tasks will fail to create.
 
+## Web UI (dsh-dag-view)
+
+A read-only Web GUI panel that visualizes DAG runs: runs list, layered
+DAG graph with state colors, task detail, live event stream, per-attempt
+subagent log view, and validated outputs. It lives in this repo's `ui/`
+subpackage (`dsh-dag-view`, insert id `dag-view`).
+
+Architecture, in five lines:
+
+- The core plugin provides the read-only service face `dagOrchestrator`
+  via `ctx.provide` — the same engine/store the `dag_*` tools read.
+- `ui/` is a dual-face plugin on the official `dsh.client` web platform.
+- The host half serves `POST /dag-view/*` JSON-envelope routes over the
+  face (resolved lazily per request).
+- The browser half injects a sidebar entry and renders the React views.
+- Polling only (run list 10 s, open run 2 s, paused when hidden);
+  control operations intentionally stay on the `dag_*` tools — the panel
+  is read-only by design.
+
+Install from this checkout:
+
+| Step | Action |
+| --- | --- |
+| 1 | `cd ui && npm install && npm run build` (emits `lib/index.js` + `lib/client.js`). |
+| 2 | Symlink the package into the profile: `ln -s "$(pwd)" ~/.dsh/profiles/web/node_modules/dsh-dag-view`. |
+| 3 | Append the insert row from `ui/cordis.patch.yml` (`id: dag-view`, `name: dsh-dag-view`) to the profile's `cordis.patch.yml`. |
+| 4 | Restart `dsh web`. |
+
+Requires the dag plugin already active in the same profile — the panel
+reads through its face. Without it, the UI degrades gracefully: every
+route answers `dag_view.unavailable` and the views show a not-loaded
+notice instead of failing.
+
+Subagent logs caveat: live child transcripts render when the DAG's
+parent session is resolvable through the current GUI session's subagent
+catalog (official `subagents.history` API); otherwise the panel falls
+back to the stored attempt summary (truncated result text).
+
+Build/dev of the UI package: `cd ui && npm install && npm run build`;
+`npm test` (vitest, 54 cases). Details — endpoints, layout algorithm,
+mount pattern, known limitations: [ui/README.md](ui/README.md).
+
 ## Boundaries
 
 - **One database, one host.** Two dsh instances writing the same `dag.db`

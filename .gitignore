@@ -1,4 +1,6 @@
 node_modules/
+ui/lib/
+ui/*.tsbuildinfo
 *.log
 *.tgz
 .DS_Store

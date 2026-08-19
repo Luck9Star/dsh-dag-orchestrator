@@ -127,6 +127,33 @@ dag_status({ run_id, detail: "tasks" })   // 终检：每个任务的结果与�
   —— **按任务 `cwd`（隔离 worktree）必需**。官方宿主会静默丢弃 `cwd`；装上该插件*并跑它的 `patches/install.sh`*，且每次 dsh 升级后重跑。
 - [dsh-worktrees](https://github.com/Luck9Star/dsh-worktrees) —— 提供 `worktree:` 任务隔离与 `merge` 节点。一个坑：它的默认 worktree 根（`~/.dsh/worktrees/`）在你的仓库之外 —— 把该路径加进本插件的 `allowedRoots`，否则 worktree 任务建不出来。
 
+## Web UI（dsh-dag-view）
+
+一个只读的 Web GUI 面板，可视化 DAG 运行：运行列表、带状态配色的分层 DAG 图、任务详情、实时事件流、按尝试查看的子代理日志、校验过的任务输出。它在本仓库的 `ui/` 子包里（`dsh-dag-view`，插入条目 id `dag-view`）。
+
+架构，五行说清：
+
+- 核心插件通过 `ctx.provide` 提供只读服务面 `dagOrchestrator` —— 与 `dag_*` 工具读的是同一套 engine/store。
+- `ui/` 是官方 `dsh.client` web 平台上的双面插件。
+- 宿主半基于该服务面提供 `POST /dag-view/*` JSON envelope 路由（每次请求惰性解析 face）。
+- 浏览器半注入侧边栏入口并渲染 React 视图。
+- 只用轮询（运行列表 10 秒 / 打开的运行 2 秒，页面不可见时暂停）；控制操作有意留在 `dag_*` 工具上 —— 面板只读是设计决定。
+
+从本检出安装：
+
+| 步骤 | 操作 |
+| --- | --- |
+| 1 | `cd ui && npm install && npm run build`（产出 `lib/index.js` + `lib/client.js`）。 |
+| 2 | 把包符号链接进 profile：`ln -s "$(pwd)" ~/.dsh/profiles/web/node_modules/dsh-dag-view`。 |
+| 3 | 把 `ui/cordis.patch.yml` 里的 insert 行（`id: dag-view`、`name: dsh-dag-view`）追加到 profile 的 `cordis.patch.yml`。 |
+| 4 | 重启 `dsh web`。 |
+
+要求 dag 插件已装在同一个 profile 里 —— 面板经它的服务面读取。缺席时 UI 优雅降级：所有路由返回 `dag_view.unavailable`，视图显示"未加载"提示而不是报错。
+
+子代理日志注意：当 DAG 的父会话能通过当前 GUI 会话的子代理目录（官方 `subagents.history` API）解析时，渲染实时子会话记录；否则回退到存储的尝试摘要（截断的结果文本）。
+
+UI 包的构建/开发：`cd ui && npm install && npm run build`；`npm test`（vitest，54 个用例）。细节 —— 端点、布局算法、挂载模式、已知限制：[ui/README.md](ui/README.md)。
+
 ## 边界
 
 - **一个数据库，一个宿主。** 不支持两个 dsh 实例写同一个 `dag.db` —— 一个数据库只走一个宿主。
