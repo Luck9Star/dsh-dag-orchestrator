@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DagViewApi } from '../../src/client/api.ts'
-import type { AttemptLogsView, RunAggregate, RunsView } from '../../src/core/types.ts'
+import type { AttemptLogsView, RunAggregate, RunsView, SessionRunsView } from '../../src/core/types.ts'
 
 /** Install a fetch mock resolving with the given envelope. */
 function mockFetch(handler: (path: string, init?: RequestInit) => Promise<{ status: number; body: unknown }>): void {
@@ -144,6 +144,31 @@ describe('DagViewApi envelope decode', () => {
     expect(partial).toEqual({ run_id: 'dag_x', limit: 10 })
     expect(Object.prototype.hasOwnProperty.call(partial, 'after_seq')).toBe(false)
     expect(Object.prototype.hasOwnProperty.call(partial, 'task_id')).toBe(false)
+  })
+
+  it('POSTs session-runs with the session_id and decodes the rows', async () => {
+    let capturedPath = ''
+    let capturedBody = ''
+    mockFetch(async (path, init) => {
+      capturedPath = path
+      capturedBody = String(init?.body ?? '')
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          value: {
+            runs: [{ run_id: 'dag_x', name: 'n', state: 'running', counts: { pending: 0, ready: 0, running: 1, succeeded: 0, failed: 0, blocked: 0 }, created_at: 1, updated_at: 2 }],
+          },
+        },
+      }
+    })
+    const api = new DagViewApi()
+    const result = await api.sessionRuns('sess_gui_1')
+    expect(capturedPath).toBe('/dag-view/session-runs')
+    expect(JSON.parse(capturedBody)).toEqual({ session_id: 'sess_gui_1' })
+    expect(result.ok).toBe(true)
+    expect((result as { value: SessionRunsView }).value.runs).toHaveLength(1)
+    expect((result as { value: SessionRunsView }).value.runs[0]!.run_id).toBe('dag_x')
   })
 
   it('POSTs attempt-logs run_id and decodes items', async () => {

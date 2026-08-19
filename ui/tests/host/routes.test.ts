@@ -73,6 +73,9 @@ function fakeFace() {
     { attempt_id: 'att_build_1', task_id: 'build', ordinal: 1, state: 'succeeded', backend: 'spawn', started_at: 1767225601000, child_session: 'sess_build_1', stop_reason: 'completed', summary: { done: true } },
     { attempt_id: 'att_verify_1', task_id: 'verify', ordinal: 1, state: 'running', backend: 'spawn', started_at: 1767225650000, child_session: 'sess_verify_1' },
   ]
+  const sessionRuns = [
+    { run_id: 'dag_20260101_abcd1234', name: 'build-and-verify', state: 'running', counts: runs[0].counts, created_at: 1767225600000, updated_at: 1767225700000 },
+  ]
   return Object.freeze({
     status: vi.fn((runId?: string | null, options?: { detail?: string; afterSeq?: number; taskId?: string; limit?: number }) => {
       if (runId === undefined || runId === null || runId === '') {
@@ -117,6 +120,10 @@ function fakeFace() {
       { task_id: 'build', name: 'report', value: { ok: true }, produced_by_attempt: 'att_build_1' },
     ]),
     attemptSummaries: vi.fn(() => summaries),
+    runsForSession: vi.fn((sessionId: string) => {
+      if (sessionId === 'sess_gui_1') return { runs: sessionRuns }
+      return { runs: [] }
+    }),
   })
 }
 
@@ -260,6 +267,39 @@ describe('/dag-view routes', () => {
     expect(envelope.ok).toBe(true)
     expect(envelope.value!.items.map((item) => item.attempt_id)).toEqual(['att_build_1', 'att_verify_1'])
     expect(face.attemptSummaries).toHaveBeenCalledWith('dag_20260101_abcd1234')
+  })
+
+  it('answers /session-runs with the session-filtered summary rows', async () => {
+    const face = fakeFace()
+    const { ctx, registered } = fakeCtx(face)
+    apply(ctx as never)
+    const result = await call(registered[0]!.handler, 'POST', '/dag-view/session-runs', { session_id: 'sess_gui_1' })
+    expect(result.status).toBe(200)
+    const envelope = result.json() as { ok: boolean; value?: { runs: Array<{ run_id: string }> } }
+    expect(envelope.ok).toBe(true)
+    expect(envelope.value!.runs).toHaveLength(1)
+    expect(envelope.value!.runs[0]!.run_id).toBe('dag_20260101_abcd1234')
+    expect(face.runsForSession).toHaveBeenCalledWith('sess_gui_1')
+  })
+
+  it('answers /session-runs with an empty list for an unknown session (not an error)', async () => {
+    const face = fakeFace()
+    const { ctx, registered } = fakeCtx(face)
+    apply(ctx as never)
+    const result = await call(registered[0]!.handler, 'POST', '/dag-view/session-runs', { session_id: 'sess_nobody' })
+    expect(result.status).toBe(200)
+    expect(result.json()).toEqual({ ok: true, value: { runs: [] } })
+  })
+
+  it('rejects a missing session_id with dag_view.bad_request', async () => {
+    const { ctx, registered } = fakeCtx(fakeFace())
+    apply(ctx as never)
+    const result = await call(registered[0]!.handler, 'POST', '/dag-view/session-runs', {})
+    expect(result.status).toBe(200)
+    expect(result.json()).toEqual({
+      ok: false,
+      error: { code: 'dag_view.bad_request', message: 'missing session_id' },
+    })
   })
 
   it('rejects a missing run_id with dag_view.bad_request', async () => {

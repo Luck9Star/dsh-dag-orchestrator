@@ -52,6 +52,14 @@ export interface DagServiceFace {
 
   /** Attempts rows of one run (optionally one task) with parsed result summaries. */
   attemptSummaries(runId: string, taskId?: string): AttemptSummary[]
+
+  /**
+   * All-runs summary rows filtered to the planning session (runs.planner_session
+   * = sessionId) — the GUI tab's "this conversation's runs" section. Rows share
+   * the status(detail:'summary') shape; an unknown session returns `{runs: []}`
+   * (an empty result is a state, not an error).
+   */
+  runsForSession(sessionId: string): { runs: readonly RunSummary[] }
 }
 
 /** Structural narrowing of the status(detail:'summary') projection. */
@@ -119,6 +127,9 @@ export function resolveFace(ctx: Context): { ok: true; face: DagServiceFace } | 
     && typeof face.getSpec === 'function'
     && typeof face.listOutputs === 'function'
     && typeof face.attemptSummaries === 'function'
+    // runsForSession is a newer face member: an older core plugin without it
+    // still serves the four original routes; only /session-runs degrades.
+    && typeof face.runsForSession === 'function'
   if (!usable) return { ok: false, error: UNUSABLE }
   return { ok: true, face: raw as DagServiceFace }
 }

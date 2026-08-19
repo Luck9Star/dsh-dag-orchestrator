@@ -6,7 +6,7 @@
  */
 
 import type {
-  AttemptLogsView, EventsView, RunAggregate, RunsView,
+  AttemptLogsView, EventsView, RunAggregate, RunsView, SessionRunsView,
 } from '../core/types.ts'
 
 /** One /dag-view envelope response. */
@@ -59,6 +59,11 @@ export class DagViewApi {
   /** All runs (summary rows with state badges and task counts). */
   runs(): Promise<ApiResult<RunsView>> {
     return post('/dag-view/runs', {})
+  }
+
+  /** Runs planned by one GUI conversation session (the tab's first section). */
+  sessionRuns(session_id: string): Promise<ApiResult<SessionRunsView>> {
+    return post('/dag-view/session-runs', { session_id })
   }
 
   /** One aggregate snapshot for the run view (spec + tasks + attempts + outputs). */

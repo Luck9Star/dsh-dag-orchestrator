@@ -167,21 +167,31 @@ row in your profile's `cordis.patch.yml`; unknown keys fail loudly at startup.
 
 ## Web UI (dsh-dag-view)
 
-A read-only Web GUI panel that visualizes DAG runs: runs list, layered
+A read-only Web GUI surface that visualizes DAG runs: runs list, layered
 DAG graph with state colors, task detail, live event stream, per-attempt
 subagent log view, and validated outputs. It lives in this repo's `ui/`
 subpackage (`dsh-dag-view`, insert id `dag-view`).
 
-Architecture, in five lines:
+Entry point: a **DAG tab in the conversation header** (next to "Chat").
+The browser half registers into the shell's official `conversation.view`
+slot ring — always visible, rendered in the conversation main area when
+selected; no sidebar button, no DOM injection.
+
+Architecture, in six lines:
 
 - The core plugin provides the read-only service face `dagOrchestrator`
   via `ctx.provide` — the same engine/store the `dag_*` tools read.
 - `ui/` is a dual-face plugin on the official `dsh.client` web platform.
 - The host half serves `POST /dag-view/*` JSON-envelope routes over the
   face (resolved lazily per request).
-- The browser half injects a sidebar entry and renders the React views.
-- Polling only (run list 10 s, open run 2 s, paused when hidden);
-  control operations intentionally stay on the `dag_*` tools — the panel
+- The browser half registers the conversation tab through
+  `ctx.slots.register({ name: 'conversation.view', id: 'dag', order: 10 })`.
+- The tab shows this conversation's runs first (linked via the new
+  `runs.planner_session` column — `dag_plan` writes the planning GUI
+  conversation's session id on every run it creates), then a divider,
+  then all runs; selecting one renders the full run view inline.
+- Polling only (run lists 10 s, open run 2 s, paused when hidden);
+  control operations intentionally stay on the `dag_*` tools — the surface
   is read-only by design.
 
 Install from this checkout:
@@ -204,8 +214,8 @@ catalog (official `subagents.history` API); otherwise the panel falls
 back to the stored attempt summary (truncated result text).
 
 Build/dev of the UI package: `cd ui && npm install && npm run build`;
-`npm test` (vitest, 54 cases). Details — endpoints, layout algorithm,
-mount pattern, known limitations: [ui/README.md](ui/README.md).
+`npm test` (vitest, 58 cases). Details — endpoints, layout algorithm,
+tab pattern, known limitations: [ui/README.md](ui/README.md).
 
 ## Boundaries
 

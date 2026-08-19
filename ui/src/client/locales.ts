@@ -1,7 +1,8 @@
 /**
  * dag-view copy: zh-first dictionaries with an English fallback, selected
  * by the document language. Kept dependency-free (no dsh locale service)
- * so the DOM-injected sidebar entry and the mounted React tree share one
+ * so the conversation-tab registration (shell-resolved label via
+ * ctx.locale / resolveSlotLabel) and the mounted React tree share one
  * tiny lookup. zh is the key-set source of truth; en mirrors it completely.
  *
  * Placeholders are simple `{name}` tokens replaced by `t()` (no formatter
@@ -14,9 +15,11 @@ export type Locale = 'zh' | 'en'
 
 /** zh dictionary (key-set source of truth). */
 export const zh = {
-  // --- chrome (mount seam; keep these keys stable) -------------------------
+  // --- chrome (conversation tab; keep these keys stable) --------------------
   'app.title': 'DAG 编排',
-  'entry.label': 'DAG 编排',
+  'tab.label': 'DAG',
+  'section.sessionRuns': '本会话的运行',
+  'section.allRuns': '全部运行',
 
   // --- view titles ---------------------------------------------------------
   'view.runs': '运行列表',
@@ -33,6 +36,22 @@ export const zh = {
   'tab.outputs': '输出',
   'tab.logs': '日志',
 
+  // --- empty states --------------------------------------------------------
+  'empty.runs': '还没有运行',
+  'empty.graph': '当前运行没有可绘制的任务',
+  'empty.taskDetail': '选择一个任务查看详情',
+  'empty.events': '暂无事件',
+  'empty.outputs': '暂无输出',
+  'empty.logs': '暂无日志',
+  'empty.noSelection': '尚未选择运行',
+  'empty.noAttempts': '暂无尝试',
+  'empty.noEvents': '暂无事件',
+  'empty.noOutputs': '暂无输出',
+  'empty.tab': '本会话还没有 DAG 运行',
+  'empty.tabTitle': '还没有任何 DAG 运行',
+  'empty.tabBody': 'DAG 运行是把一个多步任务建模为任务图：dag_plan 提交任务图，dag_tick 驱动并行子代理执行，dag_status 核对终局。在本对话里调用 dag_plan，运行的图、任务详情、事件流与日志就会出现在这个页签。',
+  'empty.tabHint': '数据也可经宿主路由 /dag-view/* 读取。',
+
   // --- lifecycle states (task / run / attempt, as UI labels) ---------------
   'state.pending': '等待',
   'state.ready': '就绪',
@@ -48,18 +67,6 @@ export const zh = {
   'state.cancelling': '取消中',
   'state.claimed': '已认领',
   'state.orphaned': '已孤立',
-
-  // --- empty states --------------------------------------------------------
-  'empty.runs': '还没有运行',
-  'empty.graph': '当前运行没有可绘制的任务',
-  'empty.taskDetail': '选择一个任务查看详情',
-  'empty.events': '暂无事件',
-  'empty.outputs': '暂无输出',
-  'empty.logs': '暂无日志',
-  'empty.noSelection': '尚未选择运行',
-  'empty.noAttempts': '暂无尝试',
-  'empty.noEvents': '暂无事件',
-  'empty.noOutputs': '暂无输出',
 
   // --- loading / error (generic + per view) --------------------------------
   'loading': '加载中…',
@@ -150,7 +157,9 @@ export type Dict = { readonly [K in DagViewKey]: string }
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
   'app.title': 'DAG Orchestration',
-  'entry.label': 'DAG Orchestration',
+  'tab.label': 'DAG',
+  'section.sessionRuns': 'Runs in this conversation',
+  'section.allRuns': 'All runs',
 
   'view.runs': 'Runs',
   'view.graph': 'DAG Graph',
@@ -190,6 +199,10 @@ export const en = {
   'empty.noAttempts': 'No attempts',
   'empty.noEvents': 'No events',
   'empty.noOutputs': 'No outputs',
+  'empty.tab': 'No DAG runs in this conversation yet',
+  'empty.tabTitle': 'No DAG runs yet',
+  'empty.tabBody': 'A DAG run models a multi-step task as a task graph: dag_plan submits the graph, dag_tick drives the parallel subagents, dag_status verifies the end state. Call dag_plan in this conversation and the run\'s graph, task detail, events, and logs appear in this tab.',
+  'empty.tabHint': 'The same data is also readable through the /dag-view/* host routes.',
 
   'loading': 'Loading…',
   'loading.runs': 'Loading runs…',

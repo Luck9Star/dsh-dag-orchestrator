@@ -74,6 +74,129 @@ test('createDagStore: rejects bad arguments loud', async () => {
   await assert.rejects(() => createDagStore({ path: 42 }), TypeError)
 })
 
+test('planner_session: fresh databases carry the column; insertRun persists it; NULL defaults hold', async (t) => {
+  const path = tmpDbPath()
+  const store = await createDagStore({ path })
+  t.after(() => store.close())
+
+  // Column exists on every fresh database (DDL)...
+  const raw = new DatabaseSync(path)
+  t.after(() => raw.close())
+  const columns = raw.prepare('PRAGMA table_info(runs)').all().map((column) => column.name)
+  assert.ok(columns.includes('planner_session'), `runs carries planner_session, got [${columns.join(', ')}]`)
+
+  // ...defaults NULL when omitted...
+  const legacy = store.insertRun({
+    run_id: 'run-legacy',
+    name: 'legacy',
+    spec_json: JSON.stringify({ version: 1, name: 'legacy', tasks: [] }),
+    spec_hash: 'a'.repeat(64),
+    state: 'running',
+    control_intent: null,
+    parent_session: null,
+    base_cwd: '/tmp/repo',
+  })
+  assert.equal(legacy.planner_session, null)
+
+  // ...and persists when provided (every INSERT writes it).
+  const linked = store.insertRun({
+    run_id: 'run-linked',
+    name: 'linked',
+    spec_json: JSON.stringify({ version: 1, name: 'linked', tasks: [] }),
+    spec_hash: 'b'.repeat(64),
+    state: 'running',
+    control_intent: null,
+    parent_session: 'parent-9',
+    planner_session: 'gui-sess-1',
+    base_cwd: '/tmp/repo',
+  })
+  assert.equal(linked.planner_session, 'gui-sess-1')
+  assert.equal(store.findRun('run-linked').planner_session, 'gui-sess-1')
+})
+
+test('planner_session: legacy v1 databases are migrated idempotently (ALTER guarded by pragma table_info)', async (t) => {
+  // Build a PRE-column v1 database the way an older release would have:
+  // ownership magic + user_version 1 + the old eleven-column runs DDL.
+  const path = tmpDbPath()
+  const legacy = new DatabaseSync(path)
+  legacy.exec('PRAGMA journal_mode = WAL')
+  legacy.exec(`PRAGMA application_id = ${0x44147d20}`)
+  legacy.exec('PRAGMA user_version = 1')
+  legacy.exec(`
+    CREATE TABLE runs (
+      run_id TEXT PRIMARY KEY, name TEXT, spec_json TEXT NOT NULL, spec_hash TEXT NOT NULL,
+      state TEXT NOT NULL, control_intent TEXT, parent_session TEXT, base_cwd TEXT NOT NULL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, version INTEGER NOT NULL
+    );
+    CREATE TABLE tasks (run_id TEXT NOT NULL, task_id TEXT NOT NULL, state TEXT NOT NULL,
+      version INTEGER NOT NULL, blocked_reason TEXT, retry_not_before INTEGER, updated_at INTEGER NOT NULL,
+      PRIMARY KEY (run_id, task_id));
+  `)
+  legacy.prepare(
+    'INSERT INTO runs (run_id, name, spec_json, spec_hash, state, base_cwd, created_at, updated_at, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run('run-old', 'old', '{}', 'c'.repeat(64), 'succeeded', '/tmp/old', 1, 1, 1)
+  legacy.close()
+
+  // Opening through the store applies the column addition exactly once
+  // (the pragma guard makes re-opens no-ops).
+  const store = await createDagStore({ path })
+  t.after(() => store.close())
+  const existing = store.findRun('run-old')
+  assert.equal(existing.planner_session, null, 'legacy rows read as NULL planner_session')
+  assert.equal(existing.name, 'old')
+
+  // New linked runs coexist with migrated legacy rows.
+  store.insertRun({
+    run_id: 'run-new',
+    name: 'new',
+    spec_json: '{}',
+    spec_hash: 'd'.repeat(64),
+    state: 'running',
+    base_cwd: '/tmp/new',
+    planner_session: 'gui-sess-2',
+  })
+  const again = await createDagStore({ path })
+  t.after(() => again.close())
+  assert.equal(again.findRun('run-old').planner_session, null, 're-open keeps the migrated row intact')
+  assert.equal(again.findRun('run-new').planner_session, 'gui-sess-2')
+})
+
+test('findRunsByPlannerSession: filters by session, oldest first; unknown session yields []', async (t) => {
+  const store = await openStore()
+  t.after(() => store.close())
+  for (const [runId, planner, created] of [
+    ['run-b', 'gui-sess-1', 2_000],
+    ['run-a', 'gui-sess-1', 1_000],
+    ['run-c', 'gui-sess-2', 3_000],
+    ['run-x', null, 4_000],
+  ]) {
+    store.insertRun({
+      run_id: runId,
+      name: runId,
+      spec_json: '{}',
+      spec_hash: 'e'.repeat(64),
+      state: 'succeeded',
+      control_intent: null,
+      parent_session: null,
+      planner_session: planner,
+      base_cwd: '/tmp/repo',
+      created_at: created,
+      updated_at: created,
+      version: 1,
+    })
+  }
+
+  assert.deepEqual(
+    store.findRunsByPlannerSession('gui-sess-1').map((row) => row.run_id),
+    ['run-a', 'run-b'],
+    'session rows, oldest first',
+  )
+  assert.deepEqual(store.findRunsByPlannerSession('gui-sess-2').map((row) => row.run_id), ['run-c'])
+  assert.deepEqual(store.findRunsByPlannerSession('no-such-session'), [], 'unknown session is empty, not an error')
+  assert.throws(() => store.findRunsByPlannerSession(''), TypeError)
+  assert.throws(() => store.findRunsByPlannerSession(undefined), TypeError)
+})
+
 test('createDagStore: refuses a foreign sqlite database without the magic (application_id mismatch)', async () => {
   const path = tmpDbPath()
   const foreign = new DatabaseSync(path)

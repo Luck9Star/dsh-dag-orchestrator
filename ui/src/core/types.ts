@@ -186,6 +186,11 @@ export interface RunsView {
   readonly runs: readonly RunSummary[]
 }
 
+/** POST /dag-view/session-runs value — the planning session's runs (same row shape). */
+export interface SessionRunsView {
+  readonly runs: readonly RunSummary[]
+}
+
 /** POST /dag-view/run value — one aggregate snapshot for the main view. */
 export interface RunAggregate {
   readonly run: RunSummary

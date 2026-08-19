@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — dsh-dag-view entry is now the official conversation tab
+
+- The browser half no longer injects a sidebar button and a center-panel
+  DOM takeover (the entry that never showed: the button was appended into
+  the outer clipping sidebar column). It registers an official
+  conversation-header tab instead:
+  `ctx.slots.register({ name: 'conversation.view', id: 'dag', order: 10, label, locale, inject }, DagTabView)`
+  — a "DAG" tab next to "Chat", rendered in the conversation main area
+  when selected; activation, placement, and lifecycle belong to the shell.
+- New `ui/src/client/views/DagTabView.tsx`: the tab body. This
+  conversation's runs first (compact cards: name, state badge, counts,
+  updated), a divider, then the all-runs section; selecting a run renders
+  the existing `DagViewApp` view tree (graph + detail + events/logs/
+  outputs tabs) inline in the tab. An empty state (no runs at all) shows
+  a centered guidance card (what DAG runs are, `dag_plan` in this
+  conversation, the `/dag-view/*` routes). The live subagent-log seam
+  moved from the deleted mount module into the tab's injected context.
+- `ui/src/client/mount.tsx` and its tests are deleted (sidebar entry,
+  center panel, and the `dsh-panel-activate` arbitration all die with it
+  — the tab needs no arbitration). `ui/src/client/index.ts` now injects
+  `['slots', 'sessions', 'locale']`, registers the zh/en dictionaries
+  through `ctx.locale.register`, and registers the tab through the
+  platform slots module.
+- package.json `dsh.client` declares
+  `inject: ['@deepseek-ai/dsh-client-runtime', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-conversation']`
+  — the browser half's service prerequisites as boot-graph metadata
+  (informational, never causal; the SDK packages ride devDependencies as
+  type-only imports, and runtime value imports stay platform-table-only).
+  Because the metadata carries no ordering guarantee, the tab registration
+  runs through `ctx.slots.inject('conversation.view', ...)` — the
+  declaration-wait guard (task-board precedent): `slots.register` into an
+  undeclared slot throws, so a boot-order race against ui-conversation's
+  declaration waits instead of crashing, and a declaring-plugin reload
+  re-registers the tab.
+
+### Added — session-linked runs (core + face + route)
+
+- `runs.planner_session TEXT` (nullable): the GUI conversation that
+  planned the run. `dag_plan` threads the planning session id
+  (`exec.agent.session.id` — the same provenance as the existing
+  `parent_session` column) through `engine.planRun` into every new run;
+  the two columns stay independent by intent (parent_session is the
+  dispatch-lineage fact, planner_session the presentation link).
+- Schema evolution: the column addition runs as an idempotent
+  `ALTER TABLE` guarded by a `PRAGMA table_info` presence check inside
+  the store's open path (never breaks existing databases; legacy rows
+  read as NULL and never match a session filter). sqlite still appears
+  only in `lib/dag-store.js`.
+- `lib/dag-store.js`: `findRunsByPlannerSession(sessionId)` — runs whose
+  planner_session equals the id, oldest first; unknown session yields
+  `[]` (a state, not an error).
+- `lib/dag-face.js`: `runsForSession(sessionId)` →
+  `{ runs: [...summary rows...] }` — the all-runs summary row shape
+  (run_id, name, state, counts, created_at, updated_at) filtered to the
+  planning session, with a findAllRuns-based fallback for stores predating
+  the new helper. Every existing face method is unchanged.
+- New route `POST /dag-view/session-runs` `{session_id}` → `{runs: [...]}`;
+  `DagServiceFace` (ui/src/host/face.ts) gains the `runsForSession`
+  member (also required by the face's usability probe — an older core
+  plugin keeps serving the four original routes only after this change
+  ships on both sides).
+
 ## [0.2.0] - 2026-08-19
 
 ### Added — read-only `dagOrchestrator` service face (UI composition seam)

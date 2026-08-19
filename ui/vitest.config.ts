@@ -1,7 +1,7 @@
 /**
- * Vitest wiring: host tests run in node, client tests in jsdom (the mount
- * tests drive MutationObserver + DOM injection). Environment picked per
- * project; the tests dir mirrors the split (tests/host, tests/client).
+ * Vitest wiring: host tests run in node, client tests in jsdom (the view
+ * tests drive React + DOM). Environment picked per project; the tests
+ * dir mirrors the split (tests/host, tests/client).
  */
 import { defineConfig } from 'vitest/config'
 
@@ -19,7 +19,7 @@ export default defineConfig({
         },
       },
       {
-        // Browser-half tests: jsdom (fetch mock, MutationObserver, DOM).
+        // Browser-half tests: jsdom (fetch mock, React view rendering).
         test: {
           name: 'client',
           include: ['tests/client/**/*.test.{ts,tsx}'],

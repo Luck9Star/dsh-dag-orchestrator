@@ -248,11 +248,13 @@ test('dag_plan: full return shape, inline first tick, exec wiring', async () => 
   assertJsonSafe(result, 'dag_plan result')
   assert.deepEqual(undefinedKeyPaths(result), [])
 
-  // planRun received the resolved base cwd + parent session + agent.
+  // planRun received the resolved base cwd + parent session + planner
+  // session (same provenance: exec.agent.session.id) + agent.
   assert.equal(engine.calls.planRun.length, 1)
   const planned = engine.calls.planRun[0]
   assert.equal(planned.options.baseCwd, '/tmp/repo')
   assert.equal(planned.options.parentSession, 'sess-42')
+  assert.equal(planned.options.plannerSession, 'sess-42')
   assert.equal(planned.options.execAgent, exec.agent)
   assert.equal(planned.spec.name, 'demo-run')
 
@@ -273,6 +275,7 @@ test('dag_plan: baseCwd falls back to process.cwd without an agent session', asy
   await ctx.registered[0].execute({ spec: validSpec() }, {})
   assert.equal(engine.calls.planRun[0].options.baseCwd, process.cwd())
   assert.equal(engine.calls.planRun[0].options.parentSession, undefined)
+  assert.equal(engine.calls.planRun[0].options.plannerSession, undefined)
 })
 
 test('dag_plan: invalid spec throws with every error aggregated, dag_plan: prefix', async () => {

@@ -20,6 +20,10 @@ export interface DagViewAppProps {
   readonly locale: Locale
   readonly seam?: LogSeam
   readonly refreshSignal?: number
+  /** Preselect this run on mount (the tab embeds the tree with a run open). */
+  readonly initialRunId?: string
+  /** Notify when the user navigated back out of the run view (tab returns to its list). */
+  readonly onExit?: () => void
 }
 
 type Tab = 'events' | 'outputs' | 'logs'
@@ -48,8 +52,10 @@ export function DagViewApp({
   locale,
   seam,
   refreshSignal,
+  initialRunId,
+  onExit,
 }: DagViewAppProps): JSX.Element {
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId ?? null)
   const [run, setRun] = useState<ApiResult<RunAggregate> | undefined>(undefined)
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(undefined)
   const [tab, setTab] = useState<Tab>('events')
@@ -91,6 +97,7 @@ export function DagViewApp({
     setTab('events')
     setRun(undefined)
     setLogAttempt(null)
+    onExit?.()
   }
 
   const onViewLog = (ord: number): void => {

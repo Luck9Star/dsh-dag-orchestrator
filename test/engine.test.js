@@ -755,6 +755,33 @@ test('engine: planRun validates strictly and rejects a cyclic spec loud', async 
   })
 })
 
+test('engine: planRun persists planner_session; store filter answers; omitted stays null', async (t) => {
+  const h = await makeHarness({})
+  t.after(() => h.close())
+  const spec = {
+    version: 1,
+    name: 'planner-linked',
+    tasks: [{ id: 'only', kind: 'agent', prompt: 'x' }],
+  }
+
+  // Provided planner session lands on the run row (GUI tab link).
+  h.engine.planRun(spec, { baseCwd: '/tmp/repo', runId: 'run-planned', plannerSession: 'gui-sess-9', parentSession: 'parent-1' })
+  const linked = h.store.findRun('run-planned')
+  assert.equal(linked.planner_session, 'gui-sess-9')
+  assert.equal(linked.parent_session, 'parent-1', 'the two session columns stay independent')
+
+  // Omitted planner session defaults to null (headless / API-planned runs).
+  h.engine.planRun({ ...spec, name: 'planner-less' }, { baseCwd: '/tmp/repo', runId: 'run-plain' })
+  assert.equal(h.store.findRun('run-plain').planner_session, null)
+
+  // The store's filter answers the face's runsForSession source.
+  assert.deepEqual(
+    h.store.findRunsByPlannerSession('gui-sess-9').map((row) => row.run_id),
+    ['run-planned'],
+  )
+  assert.deepEqual(h.store.findRunsByPlannerSession('gui-other'), [])
+})
+
 test('engine: oneRound on an unknown run throws loud', async (t) => {
   const h = await makeHarness({})
   t.after(() => h.close())

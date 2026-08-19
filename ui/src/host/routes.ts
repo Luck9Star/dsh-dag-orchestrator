@@ -207,6 +207,22 @@ export function registerDagViewRoutes(ctx: Context): () => void {
         }
         return
       }
+      case '/dag-view/session-runs': {
+        const sessionId = stringField(record, 'session_id')
+        if (sessionId === null) {
+          json(res, FAIL('dag_view.bad_request', 'missing session_id'))
+          return
+        }
+        try {
+          // The GUI tab's session link: rows planned by this conversation.
+          // An unknown session is a normal empty result, never an error.
+          const projection = face.runsForSession(sessionId)
+          json(res, OK({ runs: projection.runs }))
+        } catch (error) {
+          json(res, faceErrorToEnvelope(error, ctx.logger))
+        }
+        return
+      }
       default:
         res.writeHead(404)
         res.end()

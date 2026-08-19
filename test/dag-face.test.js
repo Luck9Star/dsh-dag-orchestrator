@@ -163,6 +163,46 @@ function fakeStore({ run = runRow() } = {}) {
   }
 }
 
+/**
+ * Fake store with the runs-by-session surface: two runs linked to the
+ * planning session, one to another session, one unlinked (NULL).
+ */
+function fakeSessionStore() {
+  const allRuns = [
+    runRow({ run_id: 'dag_1', planner_session: 'gui-1', created_at: 1, updated_at: 2 }),
+    runRow({ run_id: 'dag_2', planner_session: 'gui-1', created_at: 3, updated_at: 4 }),
+    runRow({ run_id: 'dag_3', planner_session: 'gui-2', created_at: 5, updated_at: 6 }),
+    runRow({ run_id: 'dag_4', planner_session: null, created_at: 7, updated_at: 8 }),
+  ]
+  const calls = { findRunsByPlannerSession: [], findTasks: [] }
+  return {
+    calls,
+    allRuns,
+    findRun(runId) {
+      const found = allRuns.find((row) => row.run_id === runId)
+      return found === undefined ? null : { ...found }
+    },
+    findRunsByPlannerSession(sessionId) {
+      calls.findRunsByPlannerSession.push(sessionId)
+      return allRuns.filter((row) => row.planner_session === sessionId).map((row) => ({ ...row }))
+    },
+    findTasks(runId) {
+      calls.findTasks.push(runId)
+      // One succeeded + one pending task per run — exercises countsOfTasks.
+      return [
+        { run_id: runId, task_id: 'alpha', state: 'succeeded', version: 2, blocked_reason: null, retry_not_before: null, updated_at: 2 },
+        { run_id: runId, task_id: 'beta', state: 'pending', version: 1, blocked_reason: null, retry_not_before: null, updated_at: 2 },
+      ]
+    },
+    findAttempts() {
+      return []
+    },
+    findOutputsByTask() {
+      return []
+    },
+  }
+}
+
 /** Fake engine: status records calls and returns a canned shape. */
 function fakeEngine(canned = { kind: 'status', detail: 'summary', runs: [] }) {
   const calls = []
@@ -299,6 +339,67 @@ test('dag-face: attemptSummaries taskId filter narrows to one task; unknown task
 })
 
 // ---------------------------------------------------------------------------
+// runsForSession
+// ---------------------------------------------------------------------------
+
+test('dag-face: runsForSession filters planner_session rows into summary-shaped rows', () => {
+  const store = fakeSessionStore()
+  const face = createDagFace({ engine: fakeEngine(), store })
+  const out = face.runsForSession('gui-1')
+
+  assert.deepEqual(store.calls.findRunsByPlannerSession, ['gui-1'])
+  assert.equal(out.runs.length, 2)
+  assert.deepEqual(out.runs.map((row) => row.run_id), ['dag_1', 'dag_2'])
+
+  // Row shape matches the all-runs summary arm exactly (engine.status rows).
+  const row = out.runs[0]
+  assert.deepEqual(
+    Object.keys(row).sort(),
+    ['counts', 'created_at', 'name', 'run_id', 'state', 'updated_at'],
+  )
+  assert.equal(row.name, 'face-demo')
+  assert.equal(row.state, 'succeeded')
+  assert.deepEqual(row.counts, { pending: 1, ready: 0, running: 0, succeeded: 1, failed: 0, blocked: 0 })
+
+  // The counts fold mirrors engine.status's countsOf: queued→ready,
+  // retry_wait→pending, cancelled→failed.
+  store.findTasks = () => [
+    { task_id: 'a', state: 'queued' },
+    { task_id: 'b', state: 'retry_wait' },
+    { task_id: 'c', state: 'cancelled' },
+  ]
+  assert.deepEqual(face.runsForSession('gui-1').runs[0].counts, {
+    pending: 1, ready: 1, running: 0, succeeded: 0, failed: 1, blocked: 0,
+  })
+})
+
+test('dag-face: runsForSession — unknown session returns empty (never an error); blank ids fail loud', () => {
+  const face = createDagFace({ engine: fakeEngine(), store: fakeSessionStore() })
+  assert.deepEqual(face.runsForSession('no-such-session'), { runs: [] })
+  assert.deepEqual(face.runsForSession('gui-2').runs.map((row) => row.run_id), ['dag_3'])
+
+  // Non-string / empty session ids are treated as invalid, never guessed.
+  for (const bad of [undefined, null, '', 42]) {
+    assert.throws(
+      () => face.runsForSession(bad),
+      (error) => error instanceof Error && error.code === 'dag.run_not_found',
+      `runsForSession(${JSON.stringify(bad)}) must fail loud`,
+    )
+  }
+})
+
+test('dag-face: runsForSession falls back to findAllRuns filtering when the store predates the helper', () => {
+  const store = fakeSessionStore()
+  // Simulate an older/fake store: the helper is absent, findAllRuns answers.
+  delete store.findRunsByPlannerSession
+  store.findAllRuns = () => store.allRuns.map((row) => ({ ...row }))
+  const face = createDagFace({ engine: fakeEngine(), store })
+
+  assert.deepEqual(face.runsForSession('gui-1').runs.map((row) => row.run_id), ['dag_1', 'dag_2'])
+  assert.deepEqual(face.runsForSession('gui-9'), { runs: [] })
+})
+
+// ---------------------------------------------------------------------------
 // dag.run_not_found + construction discipline
 // ---------------------------------------------------------------------------
 
@@ -406,6 +507,7 @@ async function seedTerminalRun({ path }) {
       state: 'succeeded',
       control_intent: null,
       parent_session: null,
+      planner_session: 'gui-sess-7',
       base_cwd: '/tmp/repo',
       created_at: 1_700_000_000_000,
       updated_at: 1_700_000_000_500,
@@ -492,6 +594,15 @@ test('apply: provides the frozen dagOrchestrator face over the reconciled db; al
   const without = attempts.find((row) => row.attempt_id === 'att-2')
   assert.equal(withSummary.summary.stopReason, 'completed')
   assert.equal('summary' in without, false)
+
+  // runsForSession: the seeded run planned by gui-sess-7; another session
+  // (and the NULL default) yields empty through the SAME provided face.
+  const mine = face.runsForSession('gui-sess-7')
+  assert.equal(mine.runs.length, 1)
+  assert.equal(mine.runs[0].run_id, RUN_ID)
+  assert.equal(mine.runs[0].state, 'succeeded')
+  assert.deepEqual(mine.runs[0].counts.succeeded, 2)
+  assert.deepEqual(face.runsForSession('gui-sess-other'), { runs: [] })
 
   // Unknown run still fails loud through the provided face.
   assert.throws(() => face.getSpec('dag_20990101_nopeeeee'), (error) => error.code === 'dag.run_not_found')

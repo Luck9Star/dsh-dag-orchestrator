@@ -129,15 +129,18 @@ dag_status({ run_id, detail: "tasks" })   // 终检：每个任务的结果与�
 
 ## Web UI（dsh-dag-view）
 
-一个只读的 Web GUI 面板，可视化 DAG 运行：运行列表、带状态配色的分层 DAG 图、任务详情、实时事件流、按尝试查看的子代理日志、校验过的任务输出。它在本仓库的 `ui/` 子包里（`dsh-dag-view`，插入条目 id `dag-view`）。
+一个只读的 Web GUI 界面，可视化 DAG 运行：运行列表、带状态配色的分层 DAG 图、任务详情、实时事件流、按尝试查看的子代理日志、校验过的任务输出。它在本仓库的 `ui/` 子包里（`dsh-dag-view`，插入条目 id `dag-view`）。
 
-架构，五行说清：
+入口：**对话头部的 DAG 页签**（与"Chat"并列）。浏览器半注册进 shell 官方的 `conversation.view` slot 环 —— 始终可见，选中时渲染在对话主区；没有侧边栏按钮，没有 DOM 注入。
+
+架构，六行说清：
 
 - 核心插件通过 `ctx.provide` 提供只读服务面 `dagOrchestrator` —— 与 `dag_*` 工具读的是同一套 engine/store。
 - `ui/` 是官方 `dsh.client` web 平台上的双面插件。
 - 宿主半基于该服务面提供 `POST /dag-view/*` JSON envelope 路由（每次请求惰性解析 face）。
-- 浏览器半注入侧边栏入口并渲染 React 视图。
-- 只用轮询（运行列表 10 秒 / 打开的运行 2 秒，页面不可见时暂停）；控制操作有意留在 `dag_*` 工具上 —— 面板只读是设计决定。
+- 浏览器半经 `ctx.slots.register({ name: 'conversation.view', id: 'dag', order: 10 })` 注册对话页签。
+- 页签先展示本会话的运行（经新的 `runs.planner_session` 列关联 —— `dag_plan` 把规划运行的 GUI 会话 id 写进每个新建 run），分隔之后是全部运行；点选一个运行即在页签内渲染完整运行视图。
+- 只用轮询（运行列表 10 秒 / 打开的运行 2 秒，页面不可见时暂停）；控制操作有意留在 `dag_*` 工具上 —— 界面只读是设计决定。
 
 从本检出安装：
 
@@ -152,7 +155,7 @@ dag_status({ run_id, detail: "tasks" })   // 终检：每个任务的结果与�
 
 子代理日志注意：当 DAG 的父会话能通过当前 GUI 会话的子代理目录（官方 `subagents.history` API）解析时，渲染实时子会话记录；否则回退到存储的尝试摘要（截断的结果文本）。
 
-UI 包的构建/开发：`cd ui && npm install && npm run build`；`npm test`（vitest，54 个用例）。细节 —— 端点、布局算法、挂载模式、已知限制：[ui/README.md](ui/README.md)。
+UI 包的构建/开发：`cd ui && npm install && npm run build`；`npm test`（vitest，58 个用例）。细节 —— 端点、布局算法、页签模式、已知限制：[ui/README.md](ui/README.md)。
 
 ## 边界
 
